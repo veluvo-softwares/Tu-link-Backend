@@ -240,6 +240,47 @@ export class JourneyService {
     return journeys;
   }
 
+  async getUserJourneyHistory(userId: string): Promise<Journey[]> {
+    const snapshot = await this.firebaseService.firestore
+      .collectionGroup('participants')
+      .where('userId', '==', userId)
+      .get();
+
+    const journeyIds = new Set(
+      snapshot.docs
+        .map((doc) => doc.ref.parent.parent?.id)
+        .filter((id): id is string => id !== undefined),
+    );
+    const journeys: Journey[] = [];
+
+    for (const journeyId of journeyIds) {
+      try {
+        const journey = await this.findById(journeyId);
+        if (journey.status === 'COMPLETED') {
+          journeys.push(journey);
+        }
+      } catch (error) {
+        // Skip journeys that no longer exist
+        continue;
+      }
+    }
+
+    // Sort by endTime (most recent first)
+    return journeys.sort((a, b) => {
+      const aTime = a.endTime
+        ? typeof a.endTime === 'string'
+          ? new Date(a.endTime).getTime()
+          : a.endTime.toDate().getTime()
+        : 0;
+      const bTime = b.endTime
+        ? typeof b.endTime === 'string'
+          ? new Date(b.endTime).getTime()
+          : b.endTime.toDate().getTime()
+        : 0;
+      return bTime - aTime;
+    });
+  }
+
   async getJourneyWithParticipants(journeyId: string, userId: string) {
     const journey = await this.findById(journeyId);
     const isParticipant = await this.participantService.isParticipant(journeyId, userId);
