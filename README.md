@@ -45,10 +45,17 @@ Production-ready backend for the "Tu-link" mobile app - a real-time convoy coord
 cp .env.example .env
 
 # Edit .env with your credentials:
-# - Firebase credentials
+# - Firebase credentials (Admin SDK + API Key)
 # - Google Maps API key
 # - Redis connection (optional if using Docker)
 ```
+
+**Required Firebase Variables:**
+- `FIREBASE_PROJECT_ID` - From Firebase Console
+- `FIREBASE_CLIENT_EMAIL` - From service account JSON
+- `FIREBASE_PRIVATE_KEY` - From service account JSON
+- `FIREBASE_DATABASE_URL` - Your Firestore URL
+- `FIREBASE_API_KEY` - Web API Key (for authentication) **⚠️ Required for login**
 
 ### 3. Start Redis
 ```bash
@@ -79,12 +86,33 @@ npm run start:prod
 - **Swagger Docs**: http://localhost:3000/api
 - **WebSocket**: ws://localhost:3000/location
 
+### 8. Test with Postman 📮
+```bash
+# Import the Postman collection
+1. Open Postman
+2. Import: Tu-Link-Backend.postman_collection.json
+3. Follow the testing guide: README_POSTMAN.md
+
+# Quick test (5 minutes)
+- Register users
+- Create journey
+- Send location updates
+- View analytics
+
+See: README_POSTMAN.md for complete testing guide
+```
+
 ## API Endpoints 📡
 
 ### Authentication
-- `POST /auth/register` - Register new user
-- `GET /auth/profile` - Get user profile
-- `PUT /auth/profile` - Update profile
+- `POST /auth/register` - Register new user (returns auth token)
+- `POST /auth/login` - Login with credentials (returns auth token)
+- `POST /auth/refresh` - Refresh authentication token
+- `POST /auth/logout` - Logout and revoke tokens
+- `GET /auth/profile` - Get user profile (protected)
+- `PUT /auth/profile` - Update profile (protected)
+
+**🔐 [Complete Authentication Guide](./docs/AUTHENTICATION_FLOW.md)** | **[Quick Start](./docs/AUTH_QUICK_START.md)**
 
 ### Journeys
 - `POST /journeys` - Create journey
@@ -225,10 +253,16 @@ src/
 
 ## Documentation 📚
 
-- **API Docs**: http://localhost:3000/api (Swagger)
-- **Project Status**: [PROJECT_STATUS.md](./PROJECT_STATUS.md)
-- **Implementation Plan**: [IMPLEMENTATION_PLAN.md](./IMPLEMENTATION_PLAN.md)
-- **Completion Summary**: [COMPLETION_SUMMARY.md](./COMPLETION_SUMMARY.md)
+### API & Testing
+- **Swagger API Docs**: http://localhost:3000/api (Interactive)
+- **Postman Collection**: `Tu-Link-Backend.postman_collection.json` - 40+ endpoints
+- **Postman Quick Start**: [README_POSTMAN.md](./README_POSTMAN.md) - 5-minute setup
+- **Testing Guide**: [docs/POSTMAN_TESTING_GUIDE.md](./docs/POSTMAN_TESTING_GUIDE.md) - Complete testing scenarios
+
+### Learning & Development
+- **Learning Guide**: [docs/LEARNING_GUIDE.md](./docs/LEARNING_GUIDE.md) - Deep dive into architecture
+- **Project Status**: [docs/PROJECT_STATUS.md](./docs/PROJECT_STATUS.md) - Implementation status
+- **Completion Summary**: [COMPLETION_SUMMARY.md](./COMPLETION_SUMMARY.md) - Feature overview
 
 ## Deployment 🚢
 
