@@ -46,6 +46,7 @@ export class JourneyController {
     return this.journeyService.getUserActiveJourneys(userId);
   }
 
+
   @Get('invitations')
   @ApiOperation({ summary: 'Get user pending journey invitations' })
   @ApiResponse({ status: 200, description: 'Invitations retrieved successfully' })

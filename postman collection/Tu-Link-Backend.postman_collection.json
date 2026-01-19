@@ -1,26 +1,17 @@
 {
 	"info": {
-		"_postman_id": "tulink-backend-collection",
+		"_postman_id": "2bb00b3b-30e5-4f85-94c0-cda517a8f8ed",
 		"name": "Tu-Link Backend API",
 		"description": "Complete API collection for Tu-Link convoy coordination backend.\n\n## Setup Instructions:\n1. Import this collection into Postman\n2. Set up environment variables (see Variables tab)\n3. Start with Auth → Register or Login to get a token\n4. Token will be automatically saved and used in subsequent requests\n\n## Authentication Flow:\n1. **Register** - Create new account (returns token)\n2. **Login** - Authenticate with credentials (returns token)\n3. **Refresh Token** - Get new token before expiration (1 hour)\n4. **Logout** - Revoke all tokens\n\nTokens are automatically saved to `authToken` variable and used in all protected endpoints.\n\n## Testing Flow:\n1. Register users (leader and followers) OR login with existing accounts\n2. Create a journey (as leader)\n3. Invite participants\n4. Participants accept invitations\n5. Start journey\n6. Send location updates\n7. View notifications and analytics\n8. End journey\n9. Logout when done",
-		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
-	},
-	"auth": {
-		"type": "bearer",
-		"bearer": [
-			{
-				"key": "token",
-				"value": "{{authToken}}",
-				"type": "string"
-			}
-		]
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "34030642"
 	},
 	"item": [
 		{
 			"name": "Auth",
 			"item": [
 				{
-					"name": "Register User (Leader)",
+					"name": "Register User",
 					"event": [
 						{
 							"listen": "test",
@@ -57,8 +48,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "register"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
 						},
 						"description": "Register a new user. This will be the journey leader.\n\nThe token will be automatically saved to the environment variable `authToken`."
 					},
@@ -98,8 +94,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "register"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
 						}
 					},
 					"response": []
@@ -138,8 +139,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/register",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "register"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"register"
+							]
 						}
 					},
 					"response": []
@@ -152,19 +158,32 @@
 							"script": {
 								"exec": [
 									"// Save token automatically from login response",
-									"if (pm.response.code === 200) {",
+									"if (pm.response.statusCode === 200) {",
 									"    const response = pm.response.json();",
 									"    if (response.success && response.data) {",
-									"        pm.environment.set('authToken', response.data.tokens.customToken);",
+									"        pm.environment.set('authToken', response.data.tokens.idToken);",
 									"        pm.environment.set('userId', response.data.user.uid);",
 									"        pm.environment.set('userEmail', response.data.user.email);",
 									"        console.log('✅ Login successful');",
-									"        console.log('✅ Token saved:', response.data.tokens.customToken);",
+									"        console.log('✅ Token saved:', response.data.tokens.idToken);",
 									"        console.log('✅ Token expires in:', response.data.tokens.expiresIn, 'seconds');",
 									"    }",
 									"}"
 								],
-								"type": "text/javascript"
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
 							}
 						}
 					],
@@ -181,12 +200,22 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n  \"email\": \"leader@test.com\",\n  \"password\": \"password123\"\n}"
+							"raw": "{\n    \"email\": \"testmonkey@test.com\",\n    \"password\": \"password123\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/login",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "login"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"login"
+							]
 						},
 						"description": "Login with existing credentials and receive authentication token.\n\nThe token will be automatically saved to the environment variable `authToken`."
 					},
@@ -218,8 +247,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/auth/refresh",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "refresh"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"refresh"
+							]
 						},
 						"description": "Refresh the authentication token.\n\nRequires valid authentication token. The new token will be automatically saved."
 					},
@@ -232,8 +266,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/auth/logout",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "logout"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"logout"
+							]
 						},
 						"description": "Logout and revoke all refresh tokens for the current user.\n\nRequires authentication token."
 					},
@@ -246,8 +285,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/auth/profile",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "profile"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"profile"
+							]
 						},
 						"description": "Get the current user's profile.\n\nRequires authentication token."
 					},
@@ -269,8 +313,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/auth/profile",
-							"host": ["{{baseUrl}}"],
-							"path": ["auth", "profile"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"auth",
+								"profile"
+							]
 						},
 						"description": "Update the current user's profile."
 					},
@@ -313,8 +362,12 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/journeys",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys"
+							]
 						},
 						"description": "Create a new journey. The authenticated user becomes the leader.\n\nThe journey ID will be automatically saved."
 					},
@@ -327,8 +380,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/active",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "active"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"active"
+							]
 						},
 						"description": "Get all active journeys where the user is a participant."
 					},
@@ -341,10 +399,23 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}"
+							]
 						},
 						"description": "Get details of a specific journey including participants."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Pending Invitations",
+					"request": {
+						"method": "GET",
+						"header": []
 					},
 					"response": []
 				},
@@ -364,8 +435,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}"
+							]
 						},
 						"description": "Update journey details. Only the leader can update."
 					},
@@ -387,8 +463,14 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}/invite",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}", "invite"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}",
+								"invite"
+							]
 						},
 						"description": "Invite a user to join the journey. Only the leader can invite."
 					},
@@ -411,8 +493,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}/accept",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}", "accept"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}",
+								"accept"
+							]
 						},
 						"description": "Accept a journey invitation. Use the follower's token.\n\nNote: This request uses `follower1Token` instead of `authToken`."
 					},
@@ -425,8 +513,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}/start",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}", "start"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}",
+								"start"
+							]
 						},
 						"description": "Start the journey. Only the leader can start.\n\nThis changes status from PENDING to ACTIVE."
 					},
@@ -439,8 +533,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}/end",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}", "end"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}",
+								"end"
+							]
 						},
 						"description": "End the journey. Only the leader can end.\n\nThis changes status from ACTIVE to COMPLETED."
 					},
@@ -453,8 +553,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["journeys", "{{journeyId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"journeys",
+								"{{journeyId}}"
+							]
 						},
 						"description": "Delete (cancel) a journey. Only the leader can delete.\n\nCannot delete active journeys."
 					},
@@ -482,8 +587,12 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/locations",
-							"host": ["{{baseUrl}}"],
-							"path": ["locations"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"locations"
+							]
 						},
 						"description": "Send a location update via REST (fallback when WebSocket unavailable).\n\nNote: WebSocket is preferred for real-time updates."
 					},
@@ -496,8 +605,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/history?limit=100",
-							"host": ["{{baseUrl}}"],
-							"path": ["locations", "journeys", "{{journeyId}}", "history"],
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"locations",
+								"journeys",
+								"{{journeyId}}",
+								"history"
+							],
 							"query": [
 								{
 									"key": "limit",
@@ -516,8 +632,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/latest",
-							"host": ["{{baseUrl}}"],
-							"path": ["locations", "journeys", "{{journeyId}}", "latest"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"locations",
+								"journeys",
+								"{{journeyId}}",
+								"latest"
+							]
 						},
 						"description": "Get the latest location for all participants in a journey.\n\nReturns a map of participantId -> LocationUpdate."
 					},
@@ -530,8 +653,16 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/participants/{{participantId}}?limit=50",
-							"host": ["{{baseUrl}}"],
-							"path": ["locations", "journeys", "{{journeyId}}", "participants", "{{participantId}}"],
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"locations",
+								"journeys",
+								"{{journeyId}}",
+								"participants",
+								"{{participantId}}"
+							],
 							"query": [
 								{
 									"key": "limit",
@@ -556,8 +687,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/notifications?limit=50",
-							"host": ["{{baseUrl}}"],
-							"path": ["notifications"],
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications"
+							],
 							"query": [
 								{
 									"key": "limit",
@@ -576,8 +711,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/notifications/unread-count",
-							"host": ["{{baseUrl}}"],
-							"path": ["notifications", "unread-count"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"unread-count"
+							]
 						},
 						"description": "Get count of unread notifications for the current user."
 					},
@@ -590,8 +730,15 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}/read",
-							"host": ["{{baseUrl}}"],
-							"path": ["notifications", "{{journeyId}}", "{{notificationId}}", "read"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"{{journeyId}}",
+								"{{notificationId}}",
+								"read"
+							]
 						},
 						"description": "Mark a notification as read.\n\nYou need to set `notificationId` variable first."
 					},
@@ -604,8 +751,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["notifications", "{{journeyId}}", "{{notificationId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"{{journeyId}}",
+								"{{notificationId}}"
+							]
 						},
 						"description": "Delete a notification.\n\nYou need to set `notificationId` variable first."
 					},
@@ -624,8 +777,14 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/analytics/journeys/{{journeyId}}",
-							"host": ["{{baseUrl}}"],
-							"path": ["analytics", "journeys", "{{journeyId}}"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"analytics",
+								"journeys",
+								"{{journeyId}}"
+							]
 						},
 						"description": "Get analytics for a completed journey.\n\nIncludes: total distance, average speed, lag alerts, etc."
 					},
@@ -638,8 +797,13 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/analytics/user?limit=20",
-							"host": ["{{baseUrl}}"],
-							"path": ["analytics", "user"],
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"analytics",
+								"user"
+							],
 							"query": [
 								{
 									"key": "limit",
@@ -673,8 +837,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/maps/geocode",
-							"host": ["{{baseUrl}}"],
-							"path": ["maps", "geocode"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"maps",
+								"geocode"
+							]
 						},
 						"description": "Convert an address to latitude/longitude coordinates.\n\nUses Google Maps Geocoding API."
 					},
@@ -696,8 +865,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/maps/reverse-geocode",
-							"host": ["{{baseUrl}}"],
-							"path": ["maps", "reverse-geocode"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"maps",
+								"reverse-geocode"
+							]
 						},
 						"description": "Convert latitude/longitude to a human-readable address.\n\nUses Google Maps Reverse Geocoding API."
 					},
@@ -719,8 +893,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/maps/distance",
-							"host": ["{{baseUrl}}"],
-							"path": ["maps", "distance"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"maps",
+								"distance"
+							]
 						},
 						"description": "Calculate distance and duration between two points.\n\nUses Haversine formula for distance, Google Maps Distance Matrix API for route distance."
 					},
@@ -742,8 +921,13 @@
 						},
 						"url": {
 							"raw": "{{baseUrl}}/maps/directions",
-							"host": ["{{baseUrl}}"],
-							"path": ["maps", "directions"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"maps",
+								"directions"
+							]
 						},
 						"description": "Get turn-by-turn directions between two points.\n\nUses Google Maps Directions API."
 					},
@@ -765,8 +949,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/",
-							"host": ["{{baseUrl}}"],
-							"path": [""]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								""
+							]
 						},
 						"description": "Check if the server is running.\n\nNo authentication required."
 					},
@@ -782,8 +970,12 @@
 						"header": [],
 						"url": {
 							"raw": "{{baseUrl}}/api",
-							"host": ["{{baseUrl}}"],
-							"path": ["api"]
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api"
+							]
 						},
 						"description": "View Swagger API documentation.\n\nOpen in browser for interactive docs."
 					},
@@ -792,6 +984,16 @@
 			]
 		}
 	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{authToken}}",
+				"type": "string"
+			}
+		]
+	},
 	"event": [
 		{
 			"listen": "prerequest",
