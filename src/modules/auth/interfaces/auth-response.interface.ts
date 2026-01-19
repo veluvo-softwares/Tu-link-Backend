@@ -7,12 +7,14 @@ export interface AuthResponse {
     emailVerified?: boolean;
   };
   tokens: {
-    customToken: string;
+    idToken: string; // Changed from customToken to idToken for clarity
+    refreshToken: string;
     expiresIn: number;
   };
 }
 
 export interface TokenRefreshResponse {
-  customToken: string;
+  idToken: string; // Changed from customToken to idToken for clarity
+  refreshToken: string;
   expiresIn: number;
 }

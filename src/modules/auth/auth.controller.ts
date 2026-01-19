@@ -42,13 +42,11 @@ export class AuthController {
 
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
-  @UseGuards(FirebaseAuthGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: 'Refresh authentication token' })
   @ApiResponse({ status: 200, description: 'Token refreshed successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async refresh(@CurrentUser('uid') uid: string) {
-    return this.authService.refreshToken(uid);
+  @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
+  async refresh(@Body() refreshTokenDto: { refreshToken: string }) {
+    return this.authService.refreshToken(refreshTokenDto.refreshToken);
   }
 
   @Post('logout')

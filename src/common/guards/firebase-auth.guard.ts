@@ -19,8 +19,24 @@ export class FirebaseAuthGuard implements CanActivate {
     }
 
     try {
+      // Verify the ID token
       const decodedToken =
         await this.firebaseService.auth.verifyIdToken(token);
+
+      // Get user record to check if tokens have been revoked
+      const userRecord = await this.firebaseService.auth.getUser(decodedToken.uid);
+
+      // Check if the token was issued before the revocation time
+      // tokensValidAfterTime is set when revokeRefreshTokens() is called
+      if (userRecord.tokensValidAfterTime) {
+        const tokenIssuedAt = new Date(decodedToken.iat * 1000);
+        const tokensValidAfter = new Date(userRecord.tokensValidAfterTime);
+
+        if (tokenIssuedAt < tokensValidAfter) {
+          throw new UnauthorizedException('Token has been revoked. Please login again.');
+        }
+      }
+
       request.user = {
         uid: decodedToken.uid,
         email: decodedToken.email,
@@ -28,6 +44,9 @@ export class FirebaseAuthGuard implements CanActivate {
       };
       return true;
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new UnauthorizedException('Invalid authentication token');
     }
   }

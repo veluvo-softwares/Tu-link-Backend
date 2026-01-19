@@ -32,8 +32,6 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, ApiResponse<T>
           statusCode,
           message: this.getSuccessMessage(request.method, statusCode),
           data,
-          timestamp: new Date().toISOString(),
-          path: request.url,
         };
       }),
     );

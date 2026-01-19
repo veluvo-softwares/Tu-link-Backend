@@ -13,6 +13,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../../shared/interfaces/user.interface';
 import { AuthResponse } from './interfaces/auth-response.interface';
 import { FieldValue } from 'firebase-admin/firestore';
+import { convertCommonTimestamps } from '../../common/utils/date.utils';
 import axios from 'axios';
 
 @Injectable()
@@ -65,10 +66,17 @@ export class AuthService {
         .doc(userRecord.uid)
         .set(userData);
 
-      // Generate custom token for immediate authentication
-      const customToken = await this.firebaseService.auth.createCustomToken(
-        userRecord.uid,
+      // Sign in the user to get an ID token and refresh token
+      const signInResponse = await axios.post(
+        `${this.FIREBASE_AUTH_API}:signInWithPassword?key=${this.firebaseApiKey}`,
+        {
+          email: registerDto.email,
+          password: registerDto.password,
+          returnSecureToken: true,
+        },
       );
+
+      const { idToken, refreshToken, expiresIn } = signInResponse.data;
 
       return {
         user: {
@@ -79,8 +87,9 @@ export class AuthService {
           emailVerified: false,
         },
         tokens: {
-          customToken,
-          expiresIn: 3600, // 1 hour in seconds
+          idToken,
+          refreshToken,
+          expiresIn: parseInt(expiresIn),
         },
       };
     } catch (error) {
@@ -115,7 +124,7 @@ export class AuthService {
         },
       );
 
-      const { localId, email, expiresIn } = response.data;
+      const { localId, email, idToken, refreshToken, expiresIn } = response.data;
 
       // Get user data from Firestore
       const userDoc = await this.firebaseService.firestore
@@ -129,9 +138,7 @@ export class AuthService {
 
       const userData = userDoc.data();
 
-      // Generate custom token
-      const customToken = await this.firebaseService.auth.createCustomToken(localId);
-
+      // Return the ID token and refresh token from Firebase
       return {
         user: {
           uid: localId,
@@ -141,7 +148,8 @@ export class AuthService {
           emailVerified: response.data.emailVerified || false,
         },
         tokens: {
-          customToken,
+          idToken,
+          refreshToken,
           expiresIn: parseInt(expiresIn),
         },
       };
@@ -178,7 +186,10 @@ export class AuthService {
       throw new NotFoundException('User not found');
     }
 
-    return { id: userDoc.id, ...userDoc.data() } as User;
+    const userData = { id: userDoc.id, ...userDoc.data() } as User;
+
+    // Convert Firestore Timestamps to ISO 8601 strings
+    return convertCommonTimestamps(userData);
   }
 
   async updateProfile(
@@ -210,27 +221,32 @@ export class AuthService {
     }
   }
 
-  async refreshToken(uid: string): Promise<{ customToken: string; expiresIn: number }> {
+  async refreshToken(refreshToken: string): Promise<{ idToken: string; refreshToken: string; expiresIn: number }> {
     try {
-      // Verify user still exists
-      const userRecord = await this.firebaseService.auth.getUser(uid);
+      // Use Firebase REST API to exchange refresh token for new ID token
+      const response = await axios.post(
+        `https://securetoken.googleapis.com/v1/token?key=${this.firebaseApiKey}`,
+        {
+          grant_type: 'refresh_token',
+          refresh_token: refreshToken,
+        },
+      );
 
-      if (userRecord.disabled) {
-        throw new UnauthorizedException('User account is disabled');
-      }
-
-      // Generate new custom token
-      const customToken = await this.firebaseService.auth.createCustomToken(uid);
+      const { id_token, refresh_token, expires_in } = response.data;
 
       return {
-        customToken,
-        expiresIn: 3600, // 1 hour in seconds
+        idToken: id_token,
+        refreshToken: refresh_token,
+        expiresIn: parseInt(expires_in),
       };
     } catch (error) {
-      if (error.code === 'auth/user-not-found') {
-        throw new NotFoundException('User not found');
+      if (error.response?.data?.error) {
+        const firebaseError = error.response.data.error;
+        if (firebaseError.message === 'TOKEN_EXPIRED' || firebaseError.message === 'INVALID_REFRESH_TOKEN') {
+          throw new UnauthorizedException('Refresh token expired or invalid. Please login again.');
+        }
       }
-      throw error;
+      throw new UnauthorizedException('Failed to refresh token');
     }
   }
 

@@ -67,12 +67,23 @@ docker-compose up -d
 npm install
 ```
 
-### 5. Build Project
+### 5. Setup Firestore Indexes
+```bash
+# Deploy required indexes for queries
+firebase login
+firebase use tulink-app-1a942
+firebase deploy --only firestore:indexes
+
+# OR click the index creation URL when you first encounter the error
+# See docs/FIRESTORE_INDEX_SETUP.md for detailed instructions
+```
+
+### 6. Build Project
 ```bash
 npm run build
 ```
 
-### 6. Run Application
+### 7. Run Application
 ```bash
 # Development mode (with hot-reload)
 npm run start:dev
@@ -81,12 +92,12 @@ npm run start:dev
 npm run start:prod
 ```
 
-### 7. Access Application
+### 8. Access Application
 - **API**: http://localhost:3000
 - **Swagger Docs**: http://localhost:3000/api
 - **WebSocket**: ws://localhost:3000/location
 
-### 8. Test with Postman 📮
+### 9. Test with Postman 📮
 ```bash
 # Import the Postman collection
 1. Open Postman

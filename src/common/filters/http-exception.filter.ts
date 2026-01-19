@@ -42,9 +42,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
     request: Request,
     statusCode: number,
   ): ApiErrorResponse {
-    const timestamp = new Date().toISOString();
-    const path = request.url;
-
     // Handle NestJS HttpException
     if (exception instanceof HttpException) {
       const exceptionResponse = exception.getResponse();
@@ -73,8 +70,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
               code: 'VALIDATION_ERROR',
               details: validationErrors,
             },
-            timestamp,
-            path,
           };
         }
 
@@ -86,8 +81,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
             code: this.getErrorCode(exception, response),
             details: response.error || null,
           },
-          timestamp,
-          path,
         };
       }
 
@@ -98,8 +91,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
         error: {
           code: this.getErrorCode(exception),
         },
-        timestamp,
-        path,
       };
     }
 
@@ -114,8 +105,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           code: firebaseError.errorInfo?.code || 'FIREBASE_ERROR',
           details: firebaseError.errorInfo?.message || null,
         },
-        timestamp,
-        path,
       };
     }
 
@@ -131,8 +120,6 @@ export class HttpExceptionFilter implements ExceptionFilter {
           stack: error.stack,
         }),
       },
-      timestamp,
-      path,
     };
   }
 
