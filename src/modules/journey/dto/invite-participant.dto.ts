@@ -8,5 +8,5 @@ export class InviteParticipantDto {
 
 export class InviteParticipantByIdDto {
   @IsString()
-  userId: string;
+  invitedUserId: string;
 }

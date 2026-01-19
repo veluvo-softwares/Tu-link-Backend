@@ -46,12 +46,13 @@ export class JourneyController {
     return this.journeyService.getUserActiveJourneys(userId);
   }
 
-  @Get('history')
-  @ApiOperation({ summary: 'Get user completed journeys' })
-  @ApiResponse({ status: 200, description: 'Journey history retrieved successfully' })
+
+  @Get('invitations')
+  @ApiOperation({ summary: 'Get user pending journey invitations' })
+  @ApiResponse({ status: 200, description: 'Invitations retrieved successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async getJourneyHistory(@CurrentUser('uid') userId: string) {
-    return this.journeyService.getUserJourneyHistory(userId);
+  async getPendingInvitations(@CurrentUser('uid') userId: string) {
+    return this.journeyService.getUserPendingInvitations(userId);
   }
 
   @Get(':id')
@@ -96,7 +97,7 @@ export class JourneyController {
     @CurrentUser('uid') userId: string,
     @Body() inviteDto: InviteParticipantByIdDto,
   ) {
-    await this.journeyService.inviteParticipant(id, userId, inviteDto.userId);
+    await this.journeyService.inviteParticipant(id, userId, inviteDto.invitedUserId);
     return { message: 'Invitation sent successfully' };
   }
 

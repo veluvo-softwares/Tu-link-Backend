@@ -24,15 +24,19 @@ export class ParticipantService {
       .collection('participants')
       .doc(userId);
 
-    const participantData = {
+    const participantData: any = {
       userId,
       journeyId,
       role,
       status: role === 'LEADER' ? 'ACTIVE' : 'INVITED',
       invitedBy,
       connectionStatus: 'DISCONNECTED',
-      joinedAt: role === 'LEADER' ? (FieldValue.serverTimestamp() as any) : undefined,
-    } as Omit<Participant, 'id'>;
+    };
+
+    // Only add joinedAt for leader (invited followers get it when they accept)
+    if (role === 'LEADER') {
+      participantData.joinedAt = FieldValue.serverTimestamp();
+    }
 
     await participantRef.set(participantData);
 

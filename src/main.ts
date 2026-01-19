@@ -39,17 +39,83 @@ async function bootstrap() {
 
   // Swagger documentation setup
   const config = new DocumentBuilder()
-    .setTitle('Tu-link API')
+    .setTitle('Tu-Link Backend API')
     .setDescription(
-      'Real-time convoy coordination backend with WebSocket support',
+      `Complete API for Tu-Link convoy coordination backend with real-time location tracking.
+
+## Features
+- **Real-time Location Tracking**: WebSocket-based location updates with REST fallback
+- **Journey Management**: Create, manage, and coordinate convoy journeys
+- **User Authentication**: Firebase Auth integration with token management
+- **Notifications**: Journey invitations, lag alerts, and arrival detection
+- **Analytics**: Journey statistics and user history
+- **Google Maps Integration**: Geocoding, directions, and distance calculations
+
+## Authentication
+All protected endpoints require a Bearer token in the Authorization header:
+\`\`\`
+Authorization: Bearer <your-token-here>
+\`\`\`
+
+Get tokens via:
+1. **Register**: Create new account (returns token)
+2. **Login**: Authenticate with credentials (returns token)
+3. **Refresh**: Get new token before expiration (1 hour)
+
+## Response Format
+All responses follow a standardized format:
+
+**Success:**
+\`\`\`json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Operation completed successfully",
+  "data": { ... }
+}
+\`\`\`
+
+**Error:**
+\`\`\`json
+{
+  "success": false,
+  "statusCode": 400,
+  "message": "Validation failed",
+  "error": {
+    "code": "VALIDATION_ERROR",
+    "details": [ ... ]
+  }
+}
+\`\`\`
+
+## Date Format
+All timestamps use ISO 8601 format: \`2026-01-19T10:30:00.000Z\`
+
+## WebSocket
+For real-time location updates, connect to:
+- **Namespace**: \`/location\`
+- **URL**: \`ws://localhost:3000/location\`
+- **Authentication**: Pass token in connection auth object
+      `,
     )
-    .setVersion('1.0')
-    .addBearerAuth()
-    .addTag('auth', 'Authentication endpoints')
-    .addTag('journeys', 'Journey management')
-    .addTag('locations', 'Location tracking')
-    .addTag('notifications', 'Notifications')
-    .addTag('analytics', 'Journey analytics')
+    .setVersion('1.0.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT',
+        description: 'Enter Firebase ID token (obtained from login/register)',
+      },
+      'bearer',
+    )
+    .addTag('auth', 'Authentication and user profile management')
+    .addTag('journeys', 'Journey creation, management, and invitations')
+    .addTag('locations', 'Location tracking and history (REST fallback)')
+    .addTag('notifications', 'Notification management and delivery')
+    .addTag('analytics', 'Journey analytics and user statistics')
+    .addTag('maps', 'Google Maps integration (geocoding, directions)')
+    .addServer('http://localhost:3000', 'Development')
+    .addServer('https://api.tulink.com', 'Production')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
