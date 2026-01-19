@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { JourneyService } from './journey.service';
 import { ParticipantService } from './services/participant.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
@@ -18,6 +19,8 @@ import { InviteParticipantByIdDto } from './dto/invite-participant.dto';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
+@ApiTags('journeys')
+@ApiBearerAuth()
 @Controller('journeys')
 @UseGuards(FirebaseAuthGuard)
 export class JourneyController {
@@ -36,6 +39,9 @@ export class JourneyController {
   }
 
   @Get('active')
+  @ApiOperation({ summary: 'Get user active journeys' })
+  @ApiResponse({ status: 200, description: 'Active journeys retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getActiveJourneys(@CurrentUser('uid') userId: string) {
     return this.journeyService.getUserActiveJourneys(userId);
   }

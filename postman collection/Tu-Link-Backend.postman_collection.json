@@ -1,0 +1,867 @@
+{
+	"info": {
+		"_postman_id": "tulink-backend-collection",
+		"name": "Tu-Link Backend API",
+		"description": "Complete API collection for Tu-Link convoy coordination backend.\n\n## Setup Instructions:\n1. Import this collection into Postman\n2. Set up environment variables (see Variables tab)\n3. Start with Auth → Register or Login to get a token\n4. Token will be automatically saved and used in subsequent requests\n\n## Authentication Flow:\n1. **Register** - Create new account (returns token)\n2. **Login** - Authenticate with credentials (returns token)\n3. **Refresh Token** - Get new token before expiration (1 hour)\n4. **Logout** - Revoke all tokens\n\nTokens are automatically saved to `authToken` variable and used in all protected endpoints.\n\n## Testing Flow:\n1. Register users (leader and followers) OR login with existing accounts\n2. Create a journey (as leader)\n3. Invite participants\n4. Participants accept invitations\n5. Start journey\n6. Send location updates\n7. View notifications and analytics\n8. End journey\n9. Logout when done",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{authToken}}",
+				"type": "string"
+			}
+		]
+	},
+	"item": [
+		{
+			"name": "Auth",
+			"item": [
+				{
+					"name": "Register User (Leader)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save token automatically from new response format",
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data) {",
+									"        pm.environment.set('authToken', response.data.tokens.customToken);",
+									"        pm.environment.set('userId', response.data.user.uid);",
+									"        pm.environment.set('userEmail', response.data.user.email);",
+									"        console.log('✅ Token saved:', response.data.tokens.customToken);",
+									"        console.log('✅ User ID:', response.data.user.uid);",
+									"        console.log('✅ Token expires in:', response.data.tokens.expiresIn, 'seconds');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"leader@test.com\",\n  \"password\": \"password123\",\n  \"displayName\": \"Leader User\",\n  \"phoneNumber\": \"+1234567890\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "register"]
+						},
+						"description": "Register a new user. This will be the journey leader.\n\nThe token will be automatically saved to the environment variable `authToken`."
+					},
+					"response": []
+				},
+				{
+					"name": "Register User (Follower 1)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data) {",
+									"        pm.environment.set('follower1Token', response.data.tokens.customToken);",
+									"        pm.environment.set('follower1Id', response.data.user.uid);",
+									"        console.log('✅ Follower 1 Token saved');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"follower1@test.com\",\n  \"password\": \"password123\",\n  \"displayName\": \"Follower One\",\n  \"phoneNumber\": \"+1234567891\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "register"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Register User (Follower 2)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data) {",
+									"        pm.environment.set('follower2Token', response.data.tokens.customToken);",
+									"        pm.environment.set('follower2Id', response.data.user.uid);",
+									"        console.log('✅ Follower 2 Token saved');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"follower2@test.com\",\n  \"password\": \"password123\",\n  \"displayName\": \"Follower Two\",\n  \"phoneNumber\": \"+1234567892\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "register"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save token automatically from login response",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data) {",
+									"        pm.environment.set('authToken', response.data.tokens.customToken);",
+									"        pm.environment.set('userId', response.data.user.uid);",
+									"        pm.environment.set('userEmail', response.data.user.email);",
+									"        console.log('✅ Login successful');",
+									"        console.log('✅ Token saved:', response.data.tokens.customToken);",
+									"        console.log('✅ Token expires in:', response.data.tokens.expiresIn, 'seconds');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"email\": \"leader@test.com\",\n  \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "login"]
+						},
+						"description": "Login with existing credentials and receive authentication token.\n\nThe token will be automatically saved to the environment variable `authToken`."
+					},
+					"response": []
+				},
+				{
+					"name": "Refresh Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"// Save new token from refresh response",
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    if (response.success && response.data) {",
+									"        pm.environment.set('authToken', response.data.customToken);",
+									"        console.log('✅ Token refreshed successfully');",
+									"        console.log('✅ New token expires in:', response.data.expiresIn, 'seconds');",
+									"    }",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/auth/refresh",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "refresh"]
+						},
+						"description": "Refresh the authentication token.\n\nRequires valid authentication token. The new token will be automatically saved."
+					},
+					"response": []
+				},
+				{
+					"name": "Logout",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/auth/logout",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "logout"]
+						},
+						"description": "Logout and revoke all refresh tokens for the current user.\n\nRequires authentication token."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Profile",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/auth/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "profile"]
+						},
+						"description": "Get the current user's profile.\n\nRequires authentication token."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Profile",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"displayName\": \"Updated Name\",\n  \"phoneNumber\": \"+1234567890\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/profile",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "profile"]
+						},
+						"description": "Update the current user's profile."
+					},
+					"response": []
+				}
+			],
+			"description": "Authentication endpoints with complete token management.\n\n**Available Endpoints:**\n- **Register** - Create account and receive token\n- **Login** - Authenticate and receive token\n- **Refresh Token** - Get new token (tokens expire after 1 hour)\n- **Logout** - Revoke all tokens\n- **Get Profile** - View user profile (protected)\n- **Update Profile** - Update user information (protected)\n\n**Token Management:**\n- Tokens are Firebase custom tokens\n- Expire after 3600 seconds (1 hour)\n- Automatically saved to `authToken` variable\n- Used in Authorization header for protected endpoints\n\n**Phone Numbers:**\nMust be in E.164 format: `+[country code][number]`\nExamples: `+254712345678` (Kenya), `+1234567890` (US)"
+		},
+		{
+			"name": "Journeys",
+			"item": [
+				{
+					"name": "Create Journey",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.environment.set('journeyId', response.id);",
+									"    console.log('✅ Journey ID saved:', response.id);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Road Trip to NYC\",\n  \"destination\": {\n    \"latitude\": 40.7128,\n    \"longitude\": -74.0060\n  },\n  \"destinationAddress\": \"New York, NY, USA\",\n  \"lagThresholdMeters\": 500\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/journeys",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys"]
+						},
+						"description": "Create a new journey. The authenticated user becomes the leader.\n\nThe journey ID will be automatically saved."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Active Journeys",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/active",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "active"]
+						},
+						"description": "Get all active journeys where the user is a participant."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Journey Details",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}"]
+						},
+						"description": "Get details of a specific journey including participants."
+					},
+					"response": []
+				},
+				{
+					"name": "Update Journey",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"name\": \"Updated Journey Name\",\n  \"lagThresholdMeters\": 600\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}"]
+						},
+						"description": "Update journey details. Only the leader can update."
+					},
+					"response": []
+				},
+				{
+					"name": "Invite Participant",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"invitedUserId\": \"{{follower1Id}}\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}/invite",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}", "invite"]
+						},
+						"description": "Invite a user to join the journey. Only the leader can invite."
+					},
+					"response": []
+				},
+				{
+					"name": "Accept Invitation",
+					"request": {
+						"auth": {
+							"type": "bearer",
+							"bearer": [
+								{
+									"key": "token",
+									"value": "{{follower1Token}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}/accept",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}", "accept"]
+						},
+						"description": "Accept a journey invitation. Use the follower's token.\n\nNote: This request uses `follower1Token` instead of `authToken`."
+					},
+					"response": []
+				},
+				{
+					"name": "Start Journey",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}/start",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}", "start"]
+						},
+						"description": "Start the journey. Only the leader can start.\n\nThis changes status from PENDING to ACTIVE."
+					},
+					"response": []
+				},
+				{
+					"name": "End Journey",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}/end",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}", "end"]
+						},
+						"description": "End the journey. Only the leader can end.\n\nThis changes status from ACTIVE to COMPLETED."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Journey",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/journeys/{{journeyId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["journeys", "{{journeyId}}"]
+						},
+						"description": "Delete (cancel) a journey. Only the leader can delete.\n\nCannot delete active journeys."
+					},
+					"response": []
+				}
+			],
+			"description": "Journey management endpoints for creating, updating, and managing convoys."
+		},
+		{
+			"name": "Locations",
+			"item": [
+				{
+					"name": "Send Location Update (REST)",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"journeyId\": \"{{journeyId}}\",\n  \"location\": {\n    \"latitude\": 40.7589,\n    \"longitude\": -73.9851\n  },\n  \"accuracy\": 10.5,\n  \"altitude\": 50.0,\n  \"heading\": 90.0,\n  \"speed\": 15.5,\n  \"metadata\": {\n    \"batteryLevel\": 75,\n    \"isMoving\": true\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/locations",
+							"host": ["{{baseUrl}}"],
+							"path": ["locations"]
+						},
+						"description": "Send a location update via REST (fallback when WebSocket unavailable).\n\nNote: WebSocket is preferred for real-time updates."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Location History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/history?limit=100",
+							"host": ["{{baseUrl}}"],
+							"path": ["locations", "journeys", "{{journeyId}}", "history"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "100"
+								}
+							]
+						},
+						"description": "Get location history for a journey.\n\nReturns the last 100 location updates (configurable via limit parameter)."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Latest Locations",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/latest",
+							"host": ["{{baseUrl}}"],
+							"path": ["locations", "journeys", "{{journeyId}}", "latest"]
+						},
+						"description": "Get the latest location for all participants in a journey.\n\nReturns a map of participantId -> LocationUpdate."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Participant Location History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/locations/journeys/{{journeyId}}/participants/{{participantId}}?limit=50",
+							"host": ["{{baseUrl}}"],
+							"path": ["locations", "journeys", "{{journeyId}}", "participants", "{{participantId}}"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get location history for a specific participant.\n\nYou need to set `participantId` variable first."
+					},
+					"response": []
+				}
+			],
+			"description": "Location tracking endpoints. REST fallback for WebSocket.\n\nNote: WebSocket is the primary method for sending location updates in real-time."
+		},
+		{
+			"name": "Notifications",
+			"item": [
+				{
+					"name": "Get User Notifications",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/notifications?limit=50",
+							"host": ["{{baseUrl}}"],
+							"path": ["notifications"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "50"
+								}
+							]
+						},
+						"description": "Get all notifications for the current user.\n\nReturns journey invites, lag alerts, arrival notifications, etc."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Unread Count",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/notifications/unread-count",
+							"host": ["{{baseUrl}}"],
+							"path": ["notifications", "unread-count"]
+						},
+						"description": "Get count of unread notifications for the current user."
+					},
+					"response": []
+				},
+				{
+					"name": "Mark as Read",
+					"request": {
+						"method": "PUT",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}/read",
+							"host": ["{{baseUrl}}"],
+							"path": ["notifications", "{{journeyId}}", "{{notificationId}}", "read"]
+						},
+						"description": "Mark a notification as read.\n\nYou need to set `notificationId` variable first."
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Notification",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["notifications", "{{journeyId}}", "{{notificationId}}"]
+						},
+						"description": "Delete a notification.\n\nYou need to set `notificationId` variable first."
+					},
+					"response": []
+				}
+			],
+			"description": "Notification management endpoints for viewing and managing notifications."
+		},
+		{
+			"name": "Analytics",
+			"item": [
+				{
+					"name": "Get Journey Analytics",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/analytics/journeys/{{journeyId}}",
+							"host": ["{{baseUrl}}"],
+							"path": ["analytics", "journeys", "{{journeyId}}"]
+						},
+						"description": "Get analytics for a completed journey.\n\nIncludes: total distance, average speed, lag alerts, etc."
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Journey History",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/analytics/user?limit=20",
+							"host": ["{{baseUrl}}"],
+							"path": ["analytics", "user"],
+							"query": [
+								{
+									"key": "limit",
+									"value": "20"
+								}
+							]
+						},
+						"description": "Get all journeys the user has participated in with analytics.\n\nReturns journey data with embedded analytics."
+					},
+					"response": []
+				}
+			],
+			"description": "Analytics endpoints for journey statistics and user history."
+		},
+		{
+			"name": "Maps",
+			"item": [
+				{
+					"name": "Geocode Address",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"address\": \"Times Square, New York, NY\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/maps/geocode",
+							"host": ["{{baseUrl}}"],
+							"path": ["maps", "geocode"]
+						},
+						"description": "Convert an address to latitude/longitude coordinates.\n\nUses Google Maps Geocoding API."
+					},
+					"response": []
+				},
+				{
+					"name": "Reverse Geocode",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"latitude\": 40.7589,\n  \"longitude\": -73.9851\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/maps/reverse-geocode",
+							"host": ["{{baseUrl}}"],
+							"path": ["maps", "reverse-geocode"]
+						},
+						"description": "Convert latitude/longitude to a human-readable address.\n\nUses Google Maps Reverse Geocoding API."
+					},
+					"response": []
+				},
+				{
+					"name": "Calculate Distance",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"origin\": {\n    \"latitude\": 40.7589,\n    \"longitude\": -73.9851\n  },\n  \"destination\": {\n    \"latitude\": 40.7128,\n    \"longitude\": -74.0060\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/maps/distance",
+							"host": ["{{baseUrl}}"],
+							"path": ["maps", "distance"]
+						},
+						"description": "Calculate distance and duration between two points.\n\nUses Haversine formula for distance, Google Maps Distance Matrix API for route distance."
+					},
+					"response": []
+				},
+				{
+					"name": "Get Directions",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"origin\": {\n    \"latitude\": 40.7589,\n    \"longitude\": -73.9851\n  },\n  \"destination\": {\n    \"latitude\": 40.7128,\n    \"longitude\": -74.0060\n  }\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/maps/directions",
+							"host": ["{{baseUrl}}"],
+							"path": ["maps", "directions"]
+						},
+						"description": "Get turn-by-turn directions between two points.\n\nUses Google Maps Directions API."
+					},
+					"response": []
+				}
+			],
+			"description": "Google Maps integration endpoints for geocoding, distance calculations, and directions."
+		},
+		{
+			"name": "Health Check",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/",
+							"host": ["{{baseUrl}}"],
+							"path": [""]
+						},
+						"description": "Check if the server is running.\n\nNo authentication required."
+					},
+					"response": []
+				},
+				{
+					"name": "Swagger Docs",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api",
+							"host": ["{{baseUrl}}"],
+							"path": ["api"]
+						},
+						"description": "View Swagger API documentation.\n\nOpen in browser for interactive docs."
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3000",
+			"type": "string"
+		},
+		{
+			"key": "authToken",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "userId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "journeyId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "follower1Token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "follower1Id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "follower2Token",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "follower2Id",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "participantId",
+			"value": "",
+			"type": "string"
+		},
+		{
+			"key": "notificationId",
+			"value": "",
+			"type": "string"
+		}
+	]
+}

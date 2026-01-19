@@ -15,9 +15,7 @@ All API responses follow a consistent structure based on REST API best practices
   success: true,
   statusCode: number,
   message: string,
-  data: T,
-  timestamp: string,
-  path: string
+  data: T
 }
 ```
 
@@ -29,12 +27,19 @@ All API responses follow a consistent structure based on REST API best practices
   "statusCode": 201,
   "message": "Resource created successfully",
   "data": {
-    "uid": "abc123xyz",
-    "email": "user@example.com",
-    "displayName": "John Doe"
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/register"
+    "user": {
+      "uid": "abc123xyz",
+      "email": "user@example.com",
+      "displayName": "John Doe",
+      "phoneNumber": "+254712345678",
+      "emailVerified": false
+    },
+    "tokens": {
+      "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6...",
+      "refreshToken": "AMf-vBzXXXXXXXXXXXXXXX...",
+      "expiresIn": 3600
+    }
+  }
 }
 ```
 
@@ -49,10 +54,28 @@ All API responses follow a consistent structure based on REST API best practices
     "id": "abc123xyz",
     "email": "user@example.com",
     "displayName": "John Doe",
-    "phoneNumber": "+254712345678"
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/profile"
+    "phoneNumber": "+254712345678",
+    "createdAt": "2026-01-15T10:30:00.000Z",
+    "updatedAt": "2026-01-18T17:45:30.500Z"
+  }
+}
+```
+
+### Example: Update Profile Success
+
+```json
+{
+  "success": true,
+  "statusCode": 200,
+  "message": "Resource updated successfully",
+  "data": {
+    "id": "abc123xyz",
+    "email": "user@example.com",
+    "displayName": "Jane Doe",
+    "phoneNumber": "+254712345678",
+    "createdAt": "2026-01-15T10:30:00.000Z",
+    "updatedAt": "2026-01-18T18:20:15.800Z"
+  }
 }
 ```
 
@@ -69,9 +92,7 @@ All API responses follow a consistent structure based on REST API best practices
     code: string,
     details?: any,
     stack?: string  // Only in development mode
-  },
-  timestamp: string,
-  path: string
+  }
 }
 ```
 
@@ -91,9 +112,7 @@ All API responses follow a consistent structure based on REST API best practices
         "constraint": "validation_failed"
       }
     ]
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/register"
+  }
 }
 ```
 
@@ -107,9 +126,7 @@ All API responses follow a consistent structure based on REST API best practices
   "error": {
     "code": "auth/email-already-exists",
     "details": null
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/register"
+  }
 }
 ```
 
@@ -123,9 +140,7 @@ All API responses follow a consistent structure based on REST API best practices
   "error": {
     "code": "auth/invalid-phone-number",
     "details": "TOO_SHORT"
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/register"
+  }
 }
 ```
 
@@ -139,9 +154,7 @@ All API responses follow a consistent structure based on REST API best practices
   "error": {
     "code": "UNAUTHORIZED",
     "details": null
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/profile"
+  }
 }
 ```
 
@@ -155,9 +168,7 @@ All API responses follow a consistent structure based on REST API best practices
   "error": {
     "code": "NOT_FOUND",
     "details": null
-  },
-  "timestamp": "2026-01-18T15:30:00.000Z",
-  "path": "/auth/profile/xyz123"
+  }
 }
 ```
 
