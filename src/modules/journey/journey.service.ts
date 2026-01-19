@@ -213,7 +213,86 @@ export class JourneyService {
       throw new BadRequestException('Can only invite to pending journeys');
     }
 
+    // Add participant with INVITED status
     await this.participantService.addParticipant(journeyId, invitedUserId, userId);
+
+    // Create notification for the invited user
+    await this.createInvitationNotification(journeyId, invitedUserId, userId, journey.name);
+  }
+
+  async getUserPendingInvitations(userId: string): Promise<any[]> {
+    // Get all participant records where user is invited
+    const snapshot = await this.firebaseService.firestore
+      .collectionGroup('participants')
+      .where('userId', '==', userId)
+      .where('status', '==', 'INVITED')
+      .get();
+
+    const invitations: any[] = [];
+
+    for (const doc of snapshot.docs) {
+      const journeyId = doc.ref.parent.parent?.id;
+      if (journeyId) {
+        try {
+          const journey = await this.findById(journeyId);
+
+          // Get inviter details
+          const inviterDoc = await this.firebaseService.firestore
+            .collection('users')
+            .doc(doc.data().invitedBy)
+            .get();
+
+          invitations.push({
+            journeyId: journey.id,
+            journeyName: journey.name,
+            destination: journey.destinationAddress,
+            invitedBy: {
+              uid: doc.data().invitedBy,
+              displayName: inviterDoc.data()?.displayName || 'Unknown',
+              email: inviterDoc.data()?.email || '',
+            },
+            invitedAt: doc.data().createdAt || new Date().toISOString(),
+          });
+        } catch (error) {
+          // Skip if journey no longer exists
+          continue;
+        }
+      }
+    }
+
+    return invitations;
+  }
+
+  private async createInvitationNotification(
+    journeyId: string,
+    invitedUserId: string,
+    inviterId: string,
+    journeyName: string,
+  ): Promise<void> {
+    // Get inviter details
+    const inviterDoc = await this.firebaseService.firestore
+      .collection('users')
+      .doc(inviterId)
+      .get();
+
+    const inviterName = inviterDoc.data()?.displayName || 'Someone';
+
+    // Create notification document
+    await this.firebaseService.firestore
+      .collection('notifications')
+      .add({
+        userId: invitedUserId,
+        type: 'JOURNEY_INVITATION',
+        title: 'Journey Invitation',
+        message: `${inviterName} invited you to join "${journeyName}"`,
+        data: {
+          journeyId,
+          inviterId,
+          journeyName,
+        },
+        read: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
   }
 
   async getUserActiveJourneys(userId: string): Promise<Journey[]> {
