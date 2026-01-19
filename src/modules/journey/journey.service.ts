@@ -213,6 +213,40 @@ export class JourneyService {
       throw new BadRequestException('Can only invite to pending journeys');
     }
 
+    // Check for self-invitation
+    if (userId === invitedUserId) {
+      throw new BadRequestException('Cannot invite yourself to a journey');
+    }
+
+    // Check if invited user exists
+    const invitedUserDoc = await this.firebaseService.firestore
+      .collection('users')
+      .doc(invitedUserId)
+      .get();
+
+    if (!invitedUserDoc.exists) {
+      throw new NotFoundException('Invited user not found');
+    }
+
+    // Check if user is already invited or participating
+    const existingParticipant = await this.firebaseService.firestore
+      .collection('journeys')
+      .doc(journeyId)
+      .collection('participants')
+      .doc(invitedUserId)
+      .get();
+
+    if (existingParticipant.exists) {
+      const status = existingParticipant.data()?.status;
+      if (status === 'INVITED') {
+        throw new BadRequestException('User already invited to this journey');
+      }
+      if (['ACTIVE', 'ACCEPTED'].includes(status)) {
+        throw new BadRequestException('User is already participating in this journey');
+      }
+      // If status is DECLINED or LEFT, allow re-invitation (will overwrite)
+    }
+
     // Add participant with INVITED status
     await this.participantService.addParticipant(journeyId, invitedUserId, userId);
 
@@ -254,7 +288,12 @@ export class JourneyService {
             invitedAt: doc.data().createdAt || new Date().toISOString(),
           });
         } catch (error) {
-          // Skip if journey no longer exists
+          // Only skip if journey was deleted (NotFoundException expected)
+          if (error instanceof NotFoundException) {
+            continue;
+          }
+          // Log other errors but continue processing remaining invitations
+          console.error(`Error fetching journey ${journeyId} for invitation:`, error);
           continue;
         }
       }
