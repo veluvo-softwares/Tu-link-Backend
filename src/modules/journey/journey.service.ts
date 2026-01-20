@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { ParticipantService } from './services/participant.service';
+import { NotificationService } from '../notification/notification.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
@@ -20,6 +21,7 @@ export class JourneyService {
     private firebaseService: FirebaseService,
     private redisService: RedisService,
     private participantService: ParticipantService,
+    private notificationService: NotificationService,
     private configService: ConfigService,
   ) {}
 
@@ -169,6 +171,14 @@ export class JourneyService {
       await this.redisService.addParticipantToJourney(journeyId, participant.userId);
     }
 
+    // Send journey started notifications to all active participants
+    const participantIds = activeParticipants.map((p) => p.userId);
+    await this.notificationService.sendJourneyStarted(
+      journeyId,
+      journey.name,
+      participantIds,
+    );
+
     return this.findById(journeyId);
   }
 
@@ -194,6 +204,19 @@ export class JourneyService {
 
     // Remove from active journeys in Redis
     await this.redisService.removeActiveJourney(journeyId);
+
+    // Get all active participants and send journey ended notifications
+    const participants = await this.participantService.getJourneyParticipants(journeyId);
+    const activeParticipants = participants.filter(
+      (p) => p.status === 'ACTIVE' || p.role === 'LEADER',
+    );
+    const participantIds = activeParticipants.map((p) => p.userId);
+
+    await this.notificationService.sendJourneyEnded(
+      journeyId,
+      journey.name,
+      participantIds,
+    );
 
     return this.findById(journeyId);
   }
@@ -316,22 +339,13 @@ export class JourneyService {
 
     const inviterName = inviterDoc.data()?.displayName || 'Someone';
 
-    // Create notification document
-    await this.firebaseService.firestore
-      .collection('notifications')
-      .add({
-        userId: invitedUserId,
-        type: 'JOURNEY_INVITATION',
-        title: 'Journey Invitation',
-        message: `${inviterName} invited you to join "${journeyName}"`,
-        data: {
-          journeyId,
-          inviterId,
-          journeyName,
-        },
-        read: false,
-        createdAt: FieldValue.serverTimestamp(),
-      });
+    // Send invitation notification with FCM push notification
+    await this.notificationService.sendJourneyInvite(
+      journeyId,
+      journeyName,
+      invitedUserId,
+      inviterName,
+    );
   }
 
   async getUserActiveJourneys(userId: string): Promise<Journey[]> {

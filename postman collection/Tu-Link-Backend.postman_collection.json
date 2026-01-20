@@ -2,7 +2,7 @@
 	"info": {
 		"_postman_id": "2bb00b3b-30e5-4f85-94c0-cda517a8f8ed",
 		"name": "Tu-Link Backend API",
-		"description": "Complete API collection for Tu-Link convoy coordination backend.\n\n## Setup Instructions:\n1. Import this collection into Postman\n2. Set up environment variables (see Variables tab)\n3. Start with Auth → Register or Login to get a token\n4. Token will be automatically saved and used in subsequent requests\n\n## Authentication Flow:\n1. **Register** - Create new account (returns token)\n2. **Login** - Authenticate with credentials (returns token)\n3. **Refresh Token** - Get new token before expiration (1 hour)\n4. **Logout** - Revoke all tokens\n\nTokens are automatically saved to `authToken` variable and used in all protected endpoints.\n\n## Testing Flow:\n1. Register users (leader and followers) OR login with existing accounts\n2. Create a journey (as leader)\n3. Invite participants\n4. Participants accept invitations\n5. Start journey\n6. Send location updates\n7. View notifications and analytics\n8. End journey\n9. Logout when done",
+		"description": "Complete API collection for Tu-Link convoy coordination backend.\n\n## Setup Instructions:\n1. Import this collection into Postman\n2. Set up environment variables (see Variables tab)\n3. Start with Auth → Register or Login to get a token\n4. Token will be automatically saved and used in subsequent requests\n5. **[NEW]** Register FCM token for push notifications (Notifications → Register FCM Token)\n\n## Authentication Flow:\n1. **Register** - Create new account (returns token)\n2. **Login** - Authenticate with credentials (returns token)\n3. **Refresh Token** - Get new token before expiration (1 hour)\n4. **Logout** - Revoke all tokens\n\nTokens are automatically saved to `authToken` variable and used in all protected endpoints.\n\n## Testing Flow:\n1. Register users (leader and followers) OR login with existing accounts\n2. **[NEW]** Check notification permission status\n3. **[NEW]** Register FCM token for push notifications (optional for testing)\n4. Create a journey (as leader)\n5. Invite participants → **Push notification sent to invited users**\n6. Participants accept invitations\n7. Start journey → **Push notifications sent to all participants**\n8. Send location updates\n9. View notifications and analytics\n10. End journey → **Push notifications sent to all participants**\n11. **[NEW]** Remove FCM token (optional, when logging out from device)\n12. Logout when done\n\n## Push Notifications (FCM):\n- **Check Permission Status** - See if user has enabled notifications\n- **Register FCM Token** - Enable push notifications for journey events\n- **Remove FCM Token** - Disable notifications or logout from device\n- Notifications sent for: journey start/end, invitations, arrivals, lag alerts",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
 		"_exporter_id": "34030642"
 	},
@@ -681,6 +681,91 @@
 			"name": "Notifications",
 			"item": [
 				{
+					"name": "Check Notification Permission Status",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/notifications/permission-status",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"permission-status"
+							]
+						},
+						"description": "Check if user has enabled push notifications by registering at least one FCM token.\n\n**Returns:**\n- `enabled`: true if user has at least one FCM token registered\n- `tokenCount`: Number of devices registered for notifications\n\n**Use Case:**\n- Call this on app launch to determine whether to show notification permission prompt\n- If `enabled: false`, show prompt to enable notifications\n\n**Response Example:**\n```json\n{\n  \"enabled\": true,\n  \"tokenCount\": 2\n}\n```"
+					},
+					"response": []
+				},
+				{
+					"name": "Register FCM Token",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fcmToken\": \"test-token-abc123xyz-device-001\",\n  \"platform\": \"android\",\n  \"deviceId\": \"test-device-001\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/notifications/fcm-token",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"fcm-token"
+							]
+						},
+						"description": "Register a Firebase Cloud Messaging token to receive push notifications for journey events.\n\n**Permission Flow:**\n1. User opens app for first time\n2. Call `GET /notifications/permission-status` to check if notifications enabled\n3. If not enabled, show permission prompt in UI\n4. User accepts → Request notification permission from OS\n5. Get FCM token from device\n6. Call this endpoint to register token\n\n**Journey Notifications:**\n- Journey started (when leader starts journey)\n- Journey ended (when leader ends journey)\n- Participant arrival at destination\n- Lag alerts when falling behind (WARNING/CRITICAL)\n- Journey invitation received\n\n**Token Management:**\n- Tokens are stored per device (supports multiple devices per user)\n- Same token can only be registered once\n- Include platform and deviceId for better tracking\n- Invalid tokens are automatically cleaned up\n\n**Request Fields:**\n- `fcmToken` (required): FCM registration token from device\n- `platform` (optional): android | ios | web\n- `deviceId` (optional): Unique device identifier"
+					},
+					"response": []
+				},
+				{
+					"name": "Remove FCM Token",
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fcmToken\": \"test-token-abc123xyz-device-001\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/notifications/fcm-token",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"notifications",
+								"fcm-token"
+							]
+						},
+						"description": "Remove a Firebase Cloud Messaging token from user profile.\n\n**Use When:**\n- User logs out from a specific device\n- User disables notifications in app settings\n- Token becomes invalid or expired\n- Uninstalling the app (call before uninstall if possible)\n\n**Multi-Device Support:**\nUsers can have multiple tokens (one per device). This only removes the specified token, other devices will continue receiving notifications."
+					},
+					"response": []
+				},
+				{
 					"name": "Get User Notifications",
 					"request": {
 						"method": "GET",
@@ -729,18 +814,17 @@
 						"method": "PUT",
 						"header": [],
 						"url": {
-							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}/read",
+							"raw": "{{baseUrl}}/notifications/{{notificationId}}/read",
 							"host": [
 								"{{baseUrl}}"
 							],
 							"path": [
 								"notifications",
-								"{{journeyId}}",
 								"{{notificationId}}",
 								"read"
 							]
 						},
-						"description": "Mark a notification as read.\n\nYou need to set `notificationId` variable first."
+						"description": "Mark a notification as read using only the notification ID.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"statusCode\": 200,\n  \"message\": \"Notification marked as read\"\n}\n```\n\nYou need to set `notificationId` variable first."
 					},
 					"response": []
 				},
@@ -750,22 +834,21 @@
 						"method": "DELETE",
 						"header": [],
 						"url": {
-							"raw": "{{baseUrl}}/notifications/{{journeyId}}/{{notificationId}}",
+							"raw": "{{baseUrl}}/notifications/{{notificationId}}",
 							"host": [
 								"{{baseUrl}}"
 							],
 							"path": [
 								"notifications",
-								"{{journeyId}}",
 								"{{notificationId}}"
 							]
 						},
-						"description": "Delete a notification.\n\nYou need to set `notificationId` variable first."
+						"description": "Delete a notification using only the notification ID.\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"statusCode\": 200,\n  \"message\": \"Notification deleted successfully\"\n}\n```\n\nYou need to set `notificationId` variable first."
 					},
 					"response": []
 				}
 			],
-			"description": "Notification management endpoints for viewing and managing notifications."
+			"description": "Notification management and push notification (FCM) endpoints.\n\n**Push Notification Flow:**\n1. **Check Permission Status** - Call on app launch to see if user has enabled notifications\n2. **Register FCM Token** - Enable push notifications by registering device FCM token\n3. **Remove FCM Token** - Disable notifications or logout from specific device\n\n**Notification Management:**\n- Get all user notifications\n- Get unread notification count\n- Mark notifications as read\n- Delete notifications\n\n**Automatic Push Notifications Sent For:**\n- Journey started (to all participants)\n- Journey ended (to all participants)\n- Journey invitation received\n- Participant arrival at destination\n- Lag alerts (WARNING/CRITICAL)"
 		},
 		{
 			"name": "Analytics",
