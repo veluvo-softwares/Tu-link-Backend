@@ -179,9 +179,10 @@ Users can have multiple tokens (one per device). This only removes the specified
   @Put(':notificationId/read')
   @HttpCode(HttpStatus.OK)
   async markAsRead(
+    @CurrentUser('uid') userId: string,
     @Param('notificationId') notificationId: string,
   ) {
-    await this.notificationService.markAsRead(notificationId);
+    await this.notificationService.markAsRead(notificationId, userId);
 
     return {
       success: true,
@@ -196,9 +197,10 @@ Users can have multiple tokens (one per device). This only removes the specified
   @Delete(':notificationId')
   @HttpCode(HttpStatus.OK)
   async deleteNotification(
+    @CurrentUser('uid') userId: string,
     @Param('notificationId') notificationId: string,
   ) {
-    await this.notificationService.deleteNotification(notificationId);
+    await this.notificationService.deleteNotification(notificationId, userId);
 
     // Return standard response format (interceptor will recognize and pass through)
     return {

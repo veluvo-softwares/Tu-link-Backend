@@ -140,31 +140,42 @@ export class FcmService {
 
   /**
    * Remove invalid/expired FCM tokens from all users
+   * Processes in batches of 10 to comply with Firestore's array-contains-any limit
    */
   private async removeInvalidTokens(tokens: string[]): Promise<void> {
     try {
-      // Query all users with these tokens
-      const usersSnapshot = await this.firebaseService.firestore
-        .collection('users')
-        .where('fcmTokens', 'array-contains-any', tokens.slice(0, 10)) // Firestore limit is 10
-        .get();
+      // Process in batches of 10 (Firestore array-contains-any limit)
+      for (let i = 0; i < tokens.length; i += 10) {
+        const batch = tokens.slice(i, i + 10);
 
-      const updatePromises = usersSnapshot.docs.map(async (doc) => {
-        const userData = doc.data();
-        const fcmTokens = userData.fcmTokens || [];
+        this.logger.log(`Processing token cleanup batch ${Math.floor(i / 10) + 1} (${batch.length} tokens)`);
 
-        // Filter out invalid tokens
-        const validTokens = fcmTokens.filter(
-          (tokenData: any) => !tokens.includes(tokenData.token),
-        );
+        // Query users with any of these tokens
+        const usersSnapshot = await this.firebaseService.firestore
+          .collection('users')
+          .where('fcmTokens', 'array-contains-any', batch)
+          .get();
 
-        if (validTokens.length !== fcmTokens.length) {
-          await doc.ref.update({ fcmTokens: validTokens });
-          this.logger.log(`Removed invalid tokens from user ${doc.id}`);
-        }
-      });
+        const updatePromises = usersSnapshot.docs.map(async (doc) => {
+          const userData = doc.data();
+          const fcmTokens = userData.fcmTokens || [];
 
-      await Promise.all(updatePromises);
+          // Filter out all invalid tokens (not just from current batch)
+          const validTokens = fcmTokens.filter(
+            (tokenData: any) => !tokens.includes(tokenData.token),
+          );
+
+          if (validTokens.length !== fcmTokens.length) {
+            await doc.ref.update({ fcmTokens: validTokens });
+            const removedCount = fcmTokens.length - validTokens.length;
+            this.logger.log(`Removed ${removedCount} invalid token(s) from user ${doc.id}`);
+          }
+        });
+
+        await Promise.all(updatePromises);
+      }
+
+      this.logger.log(`Token cleanup complete: processed ${tokens.length} invalid tokens`);
     } catch (error) {
       this.logger.error('Error removing invalid tokens:', error);
     }

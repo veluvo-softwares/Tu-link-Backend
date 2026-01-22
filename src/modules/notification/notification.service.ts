@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { FcmService } from './services/fcm.service';
@@ -12,6 +13,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 @Injectable()
 export class NotificationService {
+  private readonly logger = new Logger(NotificationService.name);
+
   constructor(
     private firebaseService: FirebaseService,
     private fcmService: FcmService,
@@ -203,18 +206,21 @@ export class NotificationService {
 
   /**
    * Mark notification as read
+   * Uses recipientId to scope query and prevent unauthorized access (IDOR protection)
    */
-  async markAsRead(notificationId: string): Promise<void> {
-    // Find the notification using collectionGroup query
+  async markAsRead(notificationId: string, userId: string): Promise<void> {
+    // Query scoped to user's notifications only for security and performance
     const snapshot = await this.firebaseService.firestore
       .collectionGroup('notifications')
+      .where('recipientId', '==', userId)
+      .limit(1000) // Reasonable limit per user
       .get();
 
     // Find the specific notification by ID
     const notificationDoc = snapshot.docs.find(doc => doc.id === notificationId);
 
     if (!notificationDoc) {
-      throw new NotFoundException('Notification not found');
+      throw new NotFoundException('Notification not found or you do not have permission to access it');
     }
 
     await notificationDoc.ref.update({
@@ -225,18 +231,21 @@ export class NotificationService {
 
   /**
    * Delete notification
+   * Uses recipientId to scope query and prevent unauthorized access (IDOR protection)
    */
-  async deleteNotification(notificationId: string): Promise<void> {
-    // Find the notification using collectionGroup query
+  async deleteNotification(notificationId: string, userId: string): Promise<void> {
+    // Query scoped to user's notifications only for security and performance
     const snapshot = await this.firebaseService.firestore
       .collectionGroup('notifications')
+      .where('recipientId', '==', userId)
+      .limit(1000) // Reasonable limit per user
       .get();
 
     // Find the specific notification by ID
     const notificationDoc = snapshot.docs.find(doc => doc.id === notificationId);
 
     if (!notificationDoc) {
-      throw new NotFoundException('Notification not found');
+      throw new NotFoundException('Notification not found or you do not have permission to access it');
     }
 
     await notificationDoc.ref.delete();
@@ -303,30 +312,27 @@ export class NotificationService {
     deviceId?: string,
   ): Promise<{ message: string }> {
     try {
-      console.log('🔔 Registering FCM token for user:', userId);
-      console.log('📱 Token:', fcmToken);
-      console.log('🖥️  Platform:', platform);
+      this.logger.log(`Registering FCM token for user: ${userId}`);
+      this.logger.debug(`Platform: ${platform || 'unknown'}`);
 
       const userRef = this.firebaseService.firestore.collection('users').doc(userId);
       const userDoc = await userRef.get();
 
       if (!userDoc.exists) {
-        console.error('❌ User not found:', userId);
+        this.logger.warn(`User not found: ${userId}`);
         throw new NotFoundException('User not found');
       }
-
-      console.log('✅ User found');
 
       // Get existing FCM tokens array
       const userData = userDoc.data();
       const existingTokens = userData?.fcmTokens || [];
-      console.log('📋 Existing tokens count:', existingTokens.length);
+      this.logger.debug(`Existing tokens count: ${existingTokens.length}`);
 
       // Check if token already exists
       const tokenExists = existingTokens.some((t: any) => t.token === fcmToken);
 
       if (!tokenExists) {
-        console.log('➕ Adding new FCM token...');
+        this.logger.log('Adding new FCM token');
 
         // Add new token with metadata
         // Note: Using ISO string instead of FieldValue.serverTimestamp()
@@ -347,23 +353,18 @@ export class NotificationService {
           { merge: true },
         );
 
-        console.log('✅ FCM token registered successfully');
+        this.logger.log(`FCM token registered successfully for user: ${userId}`);
         return { message: 'FCM token registered successfully' };
       }
 
-      console.log('⚠️  FCM token already registered');
+      this.logger.debug('FCM token already registered');
       return { message: 'FCM token already registered' };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       // Log the actual error for debugging
-      console.error('❌ FCM token registration error:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        stack: error.stack,
-      });
+      this.logger.error(`FCM token registration error for user ${userId}: ${error.message}`, error.stack);
       throw new BadRequestException(`Failed to register FCM token: ${error.message}`);
     }
   }
@@ -400,7 +401,7 @@ export class NotificationService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      console.error('FCM token removal error:', error);
+      this.logger.error(`FCM token removal error for user ${userId}: ${error.message}`, error.stack);
       throw new BadRequestException('Failed to remove FCM token');
     }
   }
