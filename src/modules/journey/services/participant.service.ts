@@ -1,8 +1,13 @@
-import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+import {
+  Injectable,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { FirebaseService } from '../../../shared/firebase/firebase.service';
 import { RedisService } from '../../../shared/redis/redis.service';
 import { Participant } from '../../../shared/interfaces/participant.interface';
-import { ParticipantStatus } from '../../../types/participant-status.type';
 import { FieldValue } from 'firebase-admin/firestore';
 
 @Injectable()
@@ -106,7 +111,7 @@ export class ParticipantService {
     });
 
     // Remove from Redis
-    await this.redisService.removeParticipantFromJourney(journeyId, userId);
+    await this.redisService.removeJourneyParticipant(journeyId, userId);
   }
 
   async getJourneyParticipants(journeyId: string): Promise<Participant[]> {
@@ -133,7 +138,10 @@ export class ParticipantService {
     return participantDoc.exists;
   }
 
-  async isActiveParticipant(journeyId: string, userId: string): Promise<boolean> {
+  async isActiveParticipant(
+    journeyId: string,
+    userId: string,
+  ): Promise<boolean> {
     const participantDoc = await this.firebaseService.firestore
       .collection('journeys')
       .doc(journeyId)

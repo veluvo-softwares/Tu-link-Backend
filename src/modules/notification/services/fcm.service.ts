@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../../../shared/firebase/firebase.service';
+import { MulticastMessage } from 'firebase-admin/messaging';
 
 export interface PushNotificationPayload {
   title: string;
@@ -71,45 +72,38 @@ export class FcmService {
     notification: PushNotificationPayload,
   ): Promise<{ success: boolean; sentCount: number; failedTokens: string[] }> {
     try {
-      // Build message payload
-      const message: any = {
+      // Build message payload using Firebase types
+      const message: Omit<MulticastMessage, 'tokens'> = {
         notification: {
           title: notification.title,
           body: notification.body,
+          ...(notification.imageUrl && { imageUrl: notification.imageUrl }),
         },
         data: notification.data || {},
-      };
-
-      // Add image if provided
-      if (notification.imageUrl) {
-        message.notification.imageUrl = notification.imageUrl;
-      }
-
-      // Configure Android-specific options
-      message.android = {
-        priority: 'high' as const,
-        notification: {
-          channelId: 'tulink_journey_updates',
-          sound: 'default',
-          priority: 'high' as const,
-        },
-      };
-
-      // Configure iOS-specific options
-      message.apns = {
-        payload: {
-          aps: {
+        android: {
+          priority: 'high',
+          notification: {
+            channelId: 'tulink_journey_updates',
             sound: 'default',
-            contentAvailable: true,
+            priority: 'high',
+          },
+        },
+        apns: {
+          payload: {
+            aps: {
+              sound: 'default',
+              contentAvailable: true,
+            },
           },
         },
       };
 
       // Send to multiple tokens
-      const response = await this.firebaseService.messaging.sendEachForMulticast({
-        tokens,
-        ...message,
-      });
+      const response =
+        await this.firebaseService.messaging.sendEachForMulticast({
+          tokens,
+          ...message,
+        });
 
       // Track failed tokens for cleanup
       const failedTokens: string[] = [];
@@ -148,7 +142,9 @@ export class FcmService {
       for (let i = 0; i < tokens.length; i += 10) {
         const batch = tokens.slice(i, i + 10);
 
-        this.logger.log(`Processing token cleanup batch ${Math.floor(i / 10) + 1} (${batch.length} tokens)`);
+        this.logger.log(
+          `Processing token cleanup batch ${Math.floor(i / 10) + 1} (${batch.length} tokens)`,
+        );
 
         // Query users with any of these tokens
         const usersSnapshot = await this.firebaseService.firestore
@@ -158,27 +154,32 @@ export class FcmService {
 
         const updatePromises = usersSnapshot.docs.map(async (doc) => {
           const userData = doc.data();
-          const fcmTokens = userData.fcmTokens || [];
+          const fcmTokens = (userData.fcmTokens || []) as Array<{
+            token: string;
+          }>;
 
           // Filter out all invalid tokens (not just from current batch)
           const validTokens = fcmTokens.filter(
-            (tokenData: any) => !tokens.includes(tokenData.token),
+            (tokenData) => !tokens.includes(tokenData.token),
           );
 
           if (validTokens.length !== fcmTokens.length) {
             await doc.ref.update({ fcmTokens: validTokens });
             const removedCount = fcmTokens.length - validTokens.length;
-            this.logger.log(`Removed ${removedCount} invalid token(s) from user ${doc.id}`);
+            this.logger.log(
+              `Removed ${removedCount} invalid token(s) from user ${doc.id}`,
+            );
           }
         });
 
         await Promise.all(updatePromises);
       }
 
-      this.logger.log(`Token cleanup complete: processed ${tokens.length} invalid tokens`);
+      this.logger.log(
+        `Token cleanup complete: processed ${tokens.length} invalid tokens`,
+      );
     } catch (error) {
       this.logger.error('Error removing invalid tokens:', error);
     }
   }
-
 }

@@ -1,9 +1,11 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
   ConflictException,
   NotFoundException,
   UnauthorizedException,
-  BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
@@ -18,14 +20,16 @@ import axios from 'axios';
 
 @Injectable()
 export class AuthService {
-  private readonly FIREBASE_AUTH_API = 'https://identitytoolkit.googleapis.com/v1/accounts';
+  private readonly FIREBASE_AUTH_API =
+    'https://identitytoolkit.googleapis.com/v1/accounts';
   private readonly firebaseApiKey: string;
 
   constructor(
     private firebaseService: FirebaseService,
     private configService: ConfigService,
   ) {
-    this.firebaseApiKey = this.configService.get<string>('firebase.apiKey') || '';
+    this.firebaseApiKey =
+      this.configService.get<string>('firebase.apiKey') || '';
     if (!this.firebaseApiKey) {
       throw new Error('Firebase API Key is not configured');
     }
@@ -34,7 +38,14 @@ export class AuthService {
   async register(registerDto: RegisterDto): Promise<AuthResponse> {
     try {
       // Create Firebase Auth user
-      const createUserPayload: any = {
+      interface CreateUserPayload {
+        email: string;
+        password: string;
+        displayName: string;
+        phoneNumber?: string;
+      }
+
+      const createUserPayload: CreateUserPayload = {
         email: registerDto.email,
         password: registerDto.password,
         displayName: registerDto.displayName,
@@ -49,11 +60,19 @@ export class AuthService {
         await this.firebaseService.auth.createUser(createUserPayload);
 
       // Create Firestore user document
-      const userData: any = {
+      interface UserData {
+        email: string;
+        displayName: string;
+        createdAt: ReturnType<typeof FieldValue.serverTimestamp>;
+        updatedAt: ReturnType<typeof FieldValue.serverTimestamp>;
+        phoneNumber?: string;
+      }
+
+      const userData: UserData = {
         email: registerDto.email,
         displayName: registerDto.displayName,
-        createdAt: FieldValue.serverTimestamp() as any,
-        updatedAt: FieldValue.serverTimestamp() as any,
+        createdAt: FieldValue.serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       };
 
       // Only add phoneNumber to Firestore if provided
@@ -76,7 +95,11 @@ export class AuthService {
         },
       );
 
-      const { idToken, refreshToken, expiresIn } = signInResponse.data;
+      const { idToken, refreshToken, expiresIn } = signInResponse.data as {
+        idToken: string;
+        refreshToken: string;
+        expiresIn: string;
+      };
 
       return {
         user: {
@@ -92,18 +115,24 @@ export class AuthService {
           expiresIn: parseInt(expiresIn),
         },
       };
-    } catch (error) {
+    } catch (error: unknown) {
       // Handle specific Firebase errors
-      if (error.code === 'auth/email-already-exists') {
+
+      if ((error as { code?: string }).code === 'auth/email-already-exists') {
         throw new ConflictException('Email address is already in use');
       }
-      if (error.code === 'auth/invalid-email') {
+
+      if ((error as { code?: string }).code === 'auth/invalid-email') {
         throw new ConflictException('Invalid email address');
       }
-      if (error.code === 'auth/invalid-password') {
+
+      if ((error as { code?: string }).code === 'auth/invalid-password') {
         throw new ConflictException('Password must be at least 6 characters');
       }
-      if (error.code === 'auth/phone-number-already-exists') {
+
+      if (
+        (error as { code?: string }).code === 'auth/phone-number-already-exists'
+      ) {
         throw new ConflictException('Phone number is already in use');
       }
 
@@ -124,7 +153,15 @@ export class AuthService {
         },
       );
 
-      const { localId, email, idToken, refreshToken, expiresIn } = response.data;
+      const { localId, email, idToken, refreshToken, expiresIn } =
+        response.data as {
+          localId: string;
+          email: string;
+          idToken: string;
+          refreshToken: string;
+          expiresIn: string;
+          emailVerified?: boolean;
+        };
 
       // Get user data from Firestore
       const userDoc = await this.firebaseService.firestore
@@ -136,7 +173,9 @@ export class AuthService {
         throw new NotFoundException('User profile not found');
       }
 
-      const userData = userDoc.data();
+      const userData = userDoc.data() as
+        | { displayName?: string; phoneNumber?: string }
+        | undefined;
 
       // Return the ID token and refresh token from Firebase
       return {
@@ -145,7 +184,10 @@ export class AuthService {
           email: email,
           displayName: userData?.displayName || '',
           phoneNumber: userData?.phoneNumber,
-          emailVerified: response.data.emailVerified || false,
+
+          emailVerified:
+            (response.data as { emailVerified?: boolean }).emailVerified ||
+            false,
         },
         tokens: {
           idToken,
@@ -156,15 +198,18 @@ export class AuthService {
     } catch (error) {
       if (error.response?.data?.error) {
         const firebaseError = error.response.data.error;
+
         if (
           firebaseError.message === 'INVALID_PASSWORD' ||
           firebaseError.message === 'EMAIL_NOT_FOUND'
         ) {
           throw new UnauthorizedException('Invalid email or password');
         }
+
         if (firebaseError.message === 'USER_DISABLED') {
           throw new UnauthorizedException('This account has been disabled');
         }
+
         if (firebaseError.message === 'TOO_MANY_ATTEMPTS_TRY_LATER') {
           throw new UnauthorizedException(
             'Too many failed login attempts. Please try again later',
@@ -189,7 +234,9 @@ export class AuthService {
     const userData = { id: userDoc.id, ...userDoc.data() } as User;
 
     // Convert Firestore Timestamps to ISO 8601 strings
-    return convertCommonTimestamps(userData);
+    return convertCommonTimestamps(
+      userData as unknown as Record<string, unknown>,
+    ) as unknown as User;
   }
 
   async updateProfile(
@@ -216,12 +263,14 @@ export class AuthService {
   async verifyToken(token: string): Promise<any> {
     try {
       return await this.firebaseService.auth.verifyIdToken(token);
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Invalid token');
     }
   }
 
-  async refreshToken(refreshToken: string): Promise<{ idToken: string; refreshToken: string; expiresIn: number }> {
+  async refreshToken(
+    refreshToken: string,
+  ): Promise<{ idToken: string; refreshToken: string; expiresIn: number }> {
     try {
       // Use Firebase REST API to exchange refresh token for new ID token
       const response = await axios.post(
@@ -232,18 +281,33 @@ export class AuthService {
         },
       );
 
-      const { id_token, refresh_token, expires_in } = response.data;
+      const { id_token, refresh_token, expires_in } = response.data as {
+        id_token: string;
+        refresh_token: string;
+        expires_in: string;
+      };
 
       return {
         idToken: id_token,
         refreshToken: refresh_token,
         expiresIn: parseInt(expires_in),
       };
-    } catch (error) {
-      if (error.response?.data?.error) {
-        const firebaseError = error.response.data.error;
-        if (firebaseError.message === 'TOKEN_EXPIRED' || firebaseError.message === 'INVALID_REFRESH_TOKEN') {
-          throw new UnauthorizedException('Refresh token expired or invalid. Please login again.');
+    } catch (error: unknown) {
+      if (
+        (error as { response?: { data?: { error?: { message?: string } } } })
+          .response?.data?.error
+      ) {
+        const firebaseError = (
+          error as { response: { data: { error: { message?: string } } } }
+        ).response.data.error;
+
+        if (
+          firebaseError.message === 'TOKEN_EXPIRED' ||
+          firebaseError.message === 'INVALID_REFRESH_TOKEN'
+        ) {
+          throw new UnauthorizedException(
+            'Refresh token expired or invalid. Please login again.',
+          );
         }
       }
       throw new UnauthorizedException('Failed to refresh token');
@@ -265,6 +329,7 @@ export class AuthService {
         await this.firebaseService.firestore
           .collection('users')
           .doc(uid)
+
           .update({
             lastLogout: FieldValue.serverTimestamp(),
           });

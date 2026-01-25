@@ -48,11 +48,13 @@ export class PriorityService {
 
     // 1. Significant movement (>50m from last update)
     if (lastLocation) {
+      const lastLocationCoords = {
+        latitude: lastLocation.location.latitude,
+        longitude: lastLocation.location.longitude,
+      };
+
       const distance = DistanceUtils.haversineDistance(
-        {
-          latitude: lastLocation.location.latitude,
-          longitude: lastLocation.location.longitude,
-        },
+        lastLocationCoords,
         update.location,
       );
       if (distance > 50) {
@@ -67,17 +69,19 @@ export class PriorityService {
 
     // 3. Arrival detection (near destination)
     if (journey.destination) {
+      const destinationCoords = {
+        latitude: journey.destination.latitude,
+        longitude: journey.destination.longitude,
+      };
+
       const distanceToDestination = DistanceUtils.haversineDistance(
         update.location,
-        {
-          latitude: journey.destination.latitude,
-          longitude: journey.destination.longitude,
-        },
+        destinationCoords,
       );
 
-      const arrivalThreshold = this.configService.get(
-        'app.arrivalDistanceThresholdMeters',
-      );
+      const arrivalThreshold =
+        this.configService.get<number>('app.arrivalDistanceThresholdMeters') ??
+        100;
 
       if (distanceToDestination < arrivalThreshold) {
         return 'MEDIUM';
@@ -113,7 +117,10 @@ export class PriorityService {
   /**
    * Check if battery-aware throttling should be applied
    */
-  shouldThrottleForBattery(update: LocationUpdate, priority: Priority): boolean {
+  shouldThrottleForBattery(
+    update: LocationUpdate,
+    priority: Priority,
+  ): boolean {
     const batteryLevel = update.metadata?.batteryLevel;
 
     if (!batteryLevel) return false;
@@ -139,10 +146,11 @@ export class PriorityService {
     update?: LocationUpdate,
   ): boolean {
     if (!lastLocation || !update) return false;
-    if (lastLocation.speed === undefined || update.speed === undefined) return false;
+    if (lastLocation.speed === undefined || update.speed === undefined)
+      return false;
 
     const speedDiff = Math.abs(update.speed - lastLocation.speed);
-    const speedDiffKmh = (speedDiff * 3.6); // Convert m/s to km/h
+    const speedDiffKmh = speedDiff * 3.6; // Convert m/s to km/h
 
     return speedDiffKmh > 10; // 10 km/h threshold
   }

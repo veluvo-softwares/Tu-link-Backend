@@ -1,0 +1,77 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ prod ]
+  workflow_dispatch:
+    inputs:
+      deploy_reason:
+        description: 'Reason for manual deployment'
+        required: true
+        default: 'Manual deployment'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run full test suite
+      run: |
+        npm run lint:check
+        npm run typecheck
+        npm test
+        npm run test:e2e
+
+    - name: Build application
+      run: npm run build
+
+    - name: Security scan
+      run: npm audit --audit-level=high
+
+    - name: Build Docker image
+      run: |
+        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:prod .
+        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:prod
+
+    - name: Deploy to Digital Ocean
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USERNAME }}
+        key: ${{ secrets.PROD_SSH_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
+        script: |
+          cd /opt/tulink/prod
+          git pull origin prod
+          docker-compose -f docker-compose.prod.yml pull
+          docker-compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          docker system prune -f
+
+    - name: Health check
+      run: |
+        sleep 60
+        curl -f https://api.tulink.xyz/health || exit 1
+
+    - name: Notify deployment
+      uses: 8398a7/action-slack@v3
+      if: always()
+      with:
+        status: ${{ job.status }}
+        text: 'Production deployment ${{ job.status }}: ${{ github.event.inputs.deploy_reason || github.event.head_commit.message }}'
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

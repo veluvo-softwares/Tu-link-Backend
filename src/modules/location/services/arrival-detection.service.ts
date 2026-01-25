@@ -5,7 +5,12 @@ import { ParticipantService } from '../../journey/services/participant.service';
 import { LocationUpdate } from '../../../shared/interfaces/location.interface';
 import { Journey } from '../../../shared/interfaces/journey.interface';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue, DocumentSnapshot } from 'firebase-admin/firestore';
+
+interface ParticipantData {
+  status: string;
+  [key: string]: unknown;
+}
 
 @Injectable()
 export class ArrivalDetectionService {
@@ -26,20 +31,21 @@ export class ArrivalDetectionService {
       return false;
     }
 
+    const destinationCoords = {
+      latitude: journey.destination.latitude,
+      longitude: journey.destination.longitude,
+    };
+
     const distanceToDestination = DistanceUtils.haversineDistance(
       update.location,
-      {
-        latitude: journey.destination.latitude,
-        longitude: journey.destination.longitude,
-      },
+      destinationCoords,
     );
 
-    const distanceThreshold = this.configService.get(
-      'app.arrivalDistanceThresholdMeters',
-    );
-    const speedThreshold = this.configService.get(
-      'app.arrivalSpeedThresholdMps',
-    );
+    const distanceThreshold =
+      this.configService.get<number>('app.arrivalDistanceThresholdMeters') ??
+      100;
+    const speedThreshold =
+      this.configService.get<number>('app.arrivalSpeedThresholdMps') ?? 1.39;
 
     // Consider arrived if:
     // 1. Within distance threshold (default 100 meters)
@@ -48,11 +54,7 @@ export class ArrivalDetectionService {
     const isLowSpeed = !update.speed || update.speed < speedThreshold;
 
     if (isWithinDistance && isLowSpeed) {
-      await this.markParticipantArrived(
-        update.participantId,
-        journey.id,
-        update.userId,
-      );
+      await this.markParticipantArrived(update.participantId, journey.id);
       return true;
     }
 
@@ -65,7 +67,6 @@ export class ArrivalDetectionService {
   private async markParticipantArrived(
     participantId: string,
     journeyId: string,
-    userId: string,
   ): Promise<void> {
     // Check if already marked as arrived
     const participantDoc = await this.firebaseService.firestore
@@ -79,7 +80,7 @@ export class ArrivalDetectionService {
       return;
     }
 
-    const participant = participantDoc.data();
+    const participant = participantDoc.data() as ParticipantData | undefined;
     if (participant && participant.status === 'ARRIVED') {
       return; // Already marked as arrived
     }
@@ -102,7 +103,7 @@ export class ArrivalDetectionService {
       .where('status', '==', 'ARRIVED')
       .get();
 
-    return snapshot.docs.map((doc) => doc.id);
+    return snapshot.docs.map((doc: DocumentSnapshot) => doc.id);
   }
 
   /**

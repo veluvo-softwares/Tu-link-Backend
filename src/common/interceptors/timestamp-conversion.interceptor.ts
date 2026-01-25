@@ -14,9 +14,9 @@ import { convertTimestamps } from '../utils/date.utils';
  */
 @Injectable()
 export class TimestampConversionInterceptor implements NestInterceptor {
-  intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     return next.handle().pipe(
-      map((data) => {
+      map((data: unknown) => {
         // Convert all Firestore Timestamps in the response data to ISO 8601 strings
         return convertTimestamps(data);
       }),

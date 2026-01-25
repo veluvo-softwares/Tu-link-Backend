@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
   NotFoundException,
@@ -12,7 +15,6 @@ import { NotificationService } from '../notification/notification.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
-import { JourneyStatus } from '../../types/journey-status.type';
 import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
 @Injectable()
@@ -25,8 +27,13 @@ export class JourneyService {
     private configService: ConfigService,
   ) {}
 
-  async create(userId: string, createJourneyDto: CreateJourneyDto): Promise<Journey> {
-    const journeyRef = this.firebaseService.firestore.collection('journeys').doc();
+  async create(
+    userId: string,
+    createJourneyDto: CreateJourneyDto,
+  ): Promise<Journey> {
+    const journeyRef = this.firebaseService.firestore
+      .collection('journeys')
+      .doc();
 
     const journeyData = {
       name: createJourneyDto.name,
@@ -51,7 +58,12 @@ export class JourneyService {
     await journeyRef.set(journeyData);
 
     // Add creator as leader participant
-    await this.participantService.addParticipant(journeyRef.id, userId, userId, 'LEADER');
+    await this.participantService.addParticipant(
+      journeyRef.id,
+      userId,
+      userId,
+      'LEADER',
+    );
 
     return { id: journeyRef.id, ...journeyData } as Journey;
   }
@@ -146,7 +158,8 @@ export class JourneyService {
       });
 
     // Update all accepted participants to active
-    const participants = await this.participantService.getJourneyParticipants(journeyId);
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
     const updates = participants
       .filter((p) => p.status === 'ACCEPTED' || p.role === 'LEADER')
       .map((p) =>
@@ -168,7 +181,10 @@ export class JourneyService {
       (p) => p.status === 'ACCEPTED' || p.role === 'LEADER',
     );
     for (const participant of activeParticipants) {
-      await this.redisService.addParticipantToJourney(journeyId, participant.userId);
+      await this.redisService.addJourneyParticipant(
+        journeyId,
+        participant.userId,
+      );
     }
 
     // Send journey started notifications to all active participants
@@ -206,7 +222,8 @@ export class JourneyService {
     await this.redisService.removeActiveJourney(journeyId);
 
     // Get all active participants and send journey ended notifications
-    const participants = await this.participantService.getJourneyParticipants(journeyId);
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
     const activeParticipants = participants.filter(
       (p) => p.status === 'ACTIVE' || p.role === 'LEADER',
     );
@@ -265,16 +282,27 @@ export class JourneyService {
         throw new BadRequestException('User already invited to this journey');
       }
       if (['ACTIVE', 'ACCEPTED'].includes(status)) {
-        throw new BadRequestException('User is already participating in this journey');
+        throw new BadRequestException(
+          'User is already participating in this journey',
+        );
       }
       // If status is DECLINED or LEFT, allow re-invitation (will overwrite)
     }
 
     // Add participant with INVITED status
-    await this.participantService.addParticipant(journeyId, invitedUserId, userId);
+    await this.participantService.addParticipant(
+      journeyId,
+      invitedUserId,
+      userId,
+    );
 
     // Create notification for the invited user
-    await this.createInvitationNotification(journeyId, invitedUserId, userId, journey.name);
+    await this.createInvitationNotification(
+      journeyId,
+      invitedUserId,
+      userId,
+      journey.name,
+    );
   }
 
   async getUserPendingInvitations(userId: string): Promise<any[]> {
@@ -316,7 +344,10 @@ export class JourneyService {
             continue;
           }
           // Log other errors but continue processing remaining invitations
-          console.error(`Error fetching journey ${journeyId} for invitation:`, error);
+          console.error(
+            `Error fetching journey ${journeyId} for invitation:`,
+            error,
+          );
           continue;
         }
       }
@@ -391,7 +422,7 @@ export class JourneyService {
         if (journey.status === 'COMPLETED') {
           journeys.push(journey);
         }
-      } catch (error) {
+      } catch {
         // Skip journeys that no longer exist
         continue;
       }
@@ -415,13 +446,17 @@ export class JourneyService {
 
   async getJourneyWithParticipants(journeyId: string, userId: string) {
     const journey = await this.findById(journeyId);
-    const isParticipant = await this.participantService.isParticipant(journeyId, userId);
+    const isParticipant = await this.participantService.isParticipant(
+      journeyId,
+      userId,
+    );
 
     if (!isParticipant) {
       throw new ForbiddenException('Not a participant of this journey');
     }
 
-    const participants = await this.participantService.getJourneyParticipants(journeyId);
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
 
     return {
       ...journey,

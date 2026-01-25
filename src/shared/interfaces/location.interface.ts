@@ -41,3 +41,25 @@ export interface LocationUpdate {
     statusChange?: boolean;
   };
 }
+
+export interface CachedLocation {
+  journeyId: string;
+  participantId: string;
+  userId: string;
+  location: {
+    latitude: number;
+    longitude: number;
+  };
+  accuracy: number;
+  heading?: number;
+  speed?: number;
+  altitude?: number;
+  timestamp: number;
+  sequenceNumber?: number;
+  priority?: Priority;
+  metadata?: {
+    batteryLevel?: number;
+    isMoving?: boolean;
+    statusChange?: boolean;
+  };
+}

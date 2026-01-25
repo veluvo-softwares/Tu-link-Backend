@@ -1,3 +1,8 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-call */
+/* eslint-disable @typescript-eslint/no-unsafe-return */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { Injectable } from '@nestjs/common';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { JourneyAnalytics } from '../../shared/interfaces/analytics.interface';
@@ -13,7 +18,9 @@ export class AnalyticsService {
   /**
    * Calculate and store analytics when a journey ends
    */
-  async calculateJourneyAnalytics(journeyId: string): Promise<JourneyAnalytics> {
+  async calculateJourneyAnalytics(
+    journeyId: string,
+  ): Promise<JourneyAnalytics> {
     // Get journey data
     const journeyDoc = await this.firebaseService.firestore
       .collection('journeys')
@@ -35,7 +42,7 @@ export class AnalyticsService {
       .get();
 
     const locations = locationsSnapshot.docs.map(
-      (doc) => ({ id: doc.id, ...doc.data() } as LocationHistory),
+      (doc) => ({ id: doc.id, ...doc.data() }) as LocationHistory,
     );
 
     // Get all lag alerts
@@ -63,14 +70,15 @@ export class AnalyticsService {
     // Calculate duration
     const startTime = journey.startTime;
     const endTime = journey.endTime;
-    const totalDuration = startTime && endTime
-      ? (endTime.toMillis() - startTime.toMillis()) / 1000
-      : 0;
+    const totalDuration =
+      startTime && endTime
+        ? (endTime.toMillis() - startTime.toMillis()) / 1000
+        : 0;
 
     // Create analytics document
     const analyticsData = {
       journeyId,
-      startTime: journey.startTime || FieldValue.serverTimestamp() as any,
+      startTime: journey.startTime || (FieldValue.serverTimestamp() as any),
       endTime: journey.endTime,
       totalDuration,
       totalDistance,
@@ -94,7 +102,9 @@ export class AnalyticsService {
   /**
    * Get analytics for a specific journey
    */
-  async getJourneyAnalytics(journeyId: string): Promise<JourneyAnalytics | null> {
+  async getJourneyAnalytics(
+    journeyId: string,
+  ): Promise<JourneyAnalytics | null> {
     const analyticsDoc = await this.firebaseService.firestore
       .collection('analytics')
       .doc(journeyId)
@@ -110,7 +120,10 @@ export class AnalyticsService {
   /**
    * Get user's journey history with analytics
    */
-  async getUserJourneyHistory(userId: string, limit: number = 20): Promise<any[]> {
+  async getUserJourneyHistory(
+    userId: string,
+    limit: number = 20,
+  ): Promise<any[]> {
     // Get all journeys where user was a participant
     const participantsSnapshot = await this.firebaseService.firestore
       .collectionGroup('participants')

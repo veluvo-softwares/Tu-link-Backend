@@ -11,10 +11,14 @@ export class DistanceUtils {
     point1: { latitude: number; longitude: number } | GeoPoint,
     point2: { latitude: number; longitude: number } | GeoPoint,
   ): number {
-    const lat1 = 'latitude' in point1 ? point1.latitude : (point1 as GeoPoint).latitude;
-    const lon1 = 'longitude' in point1 ? point1.longitude : (point1 as GeoPoint).longitude;
-    const lat2 = 'latitude' in point2 ? point2.latitude : (point2 as GeoPoint).latitude;
-    const lon2 = 'longitude' in point2 ? point2.longitude : (point2 as GeoPoint).longitude;
+    const lat1 =
+      'latitude' in point1 ? point1.latitude : (point1 as GeoPoint).latitude;
+    const lon1 =
+      'longitude' in point1 ? point1.longitude : (point1 as GeoPoint).longitude;
+    const lat2 =
+      'latitude' in point2 ? point2.latitude : (point2 as GeoPoint).latitude;
+    const lon2 =
+      'longitude' in point2 ? point2.longitude : (point2 as GeoPoint).longitude;
 
     const R = 6371e3; // Earth's radius in meters
     const φ1 = (lat1 * Math.PI) / 180;
@@ -35,19 +39,17 @@ export class DistanceUtils {
    */
   static isValidCoordinate(latitude: number, longitude: number): boolean {
     return (
-      latitude >= -90 &&
-      latitude <= 90 &&
-      longitude >= -180 &&
-      longitude <= 180
+      latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
     );
   }
 
   /**
    * Convert GeoPoint to simple coordinates object
    */
-  static geoPointToCoords(
-    geoPoint: GeoPoint,
-  ): { latitude: number; longitude: number } {
+  static geoPointToCoords(geoPoint: GeoPoint): {
+    latitude: number;
+    longitude: number;
+  } {
     return {
       latitude: geoPoint.latitude,
       longitude: geoPoint.longitude,

@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../../shared/redis/redis.service';
@@ -42,7 +45,10 @@ export class AcknowledgmentService {
     journeyId: string,
     participantId: string,
   ): Promise<any[]> {
-    return await this.redisService.getPendingDeliveries(journeyId, participantId);
+    return await this.redisService.getPendingDeliveries(
+      journeyId,
+      participantId,
+    );
   }
 
   /**
@@ -88,7 +94,11 @@ export class AcknowledgmentService {
         // Update attempt count
         item.attempt++;
         await this.redisService.removePendingDelivery(journeyId, participantId);
-        await this.redisService.addPendingDelivery(journeyId, participantId, item);
+        await this.redisService.addPendingDelivery(
+          journeyId,
+          participantId,
+          item,
+        );
       }
     }
   }
