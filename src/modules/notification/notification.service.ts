@@ -1,5 +1,11 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from '@nestjs/common';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
+import { FcmService } from './services/fcm.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { Notification } from '../../shared/interfaces/notification.interface';
 import { NotificationType } from '../../types/notification.type';
@@ -7,7 +13,12 @@ import { FieldValue } from 'firebase-admin/firestore';
 
 @Injectable()
 export class NotificationService {
-  constructor(private firebaseService: FirebaseService) {}
+  private readonly logger = new Logger(NotificationService.name);
+
+  constructor(
+    private firebaseService: FirebaseService,
+    private fcmService: FcmService,
+  ) {}
 
   /**
    * Create and send a notification
@@ -34,8 +45,13 @@ export class NotificationService {
 
     await notificationRef.set(notificationData);
 
-    // TODO: Send FCM push notification (requires FCM token registration)
-    // await this.sendPushNotification(createNotificationDto.recipientId, notificationData);
+    // Send FCM push notification
+    const userTokens = await this.getUserFcmTokens(createNotificationDto.recipientId);
+    await this.fcmService.sendToUser(userTokens, {
+      title: createNotificationDto.title,
+      body: createNotificationDto.body,
+      data: this.convertDataToStringRecord(createNotificationDto.data),
+    });
 
     return { id: notificationRef.id, ...notificationData } as Notification;
   }
@@ -55,22 +71,26 @@ export class NotificationService {
       type: 'JOURNEY_INVITE',
       title: 'Journey Invitation',
       body: `${inviterName} invited you to join "${journeyName}"`,
-      data: { journeyId, inviterName },
+      data: { journeyId, journeyName, inviterName },
     });
   }
 
   /**
    * Send journey started notification
    */
-  async sendJourneyStarted(journeyId: string, recipientIds: string[]): Promise<void> {
+  async sendJourneyStarted(
+    journeyId: string,
+    journeyName: string,
+    recipientIds: string[],
+  ): Promise<void> {
     const notifications = recipientIds.map((recipientId) =>
       this.createNotification({
         journeyId,
         recipientId,
         type: 'JOURNEY_STARTED',
         title: 'Journey Started',
-        body: 'The journey has begun!',
-        data: { journeyId },
+        body: `The journey "${journeyName}" has begun!`,
+        data: { journeyId, journeyName },
       }),
     );
 
@@ -80,15 +100,19 @@ export class NotificationService {
   /**
    * Send journey ended notification
    */
-  async sendJourneyEnded(journeyId: string, recipientIds: string[]): Promise<void> {
+  async sendJourneyEnded(
+    journeyId: string,
+    journeyName: string,
+    recipientIds: string[],
+  ): Promise<void> {
     const notifications = recipientIds.map((recipientId) =>
       this.createNotification({
         journeyId,
         recipientId,
         type: 'JOURNEY_ENDED',
         title: 'Journey Completed',
-        body: 'The journey has ended',
-        data: { journeyId },
+        body: `The journey "${journeyName}" has ended`,
+        data: { journeyId, journeyName },
       }),
     );
 
@@ -113,7 +137,7 @@ export class NotificationService {
       type: 'LAG_ALERT',
       title,
       body,
-      data: { distance, severity },
+      data: { distance: distance.toString(), severity },
     });
   }
 
@@ -122,6 +146,7 @@ export class NotificationService {
    */
   async sendParticipantJoined(
     journeyId: string,
+    journeyName: string,
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
@@ -132,7 +157,7 @@ export class NotificationService {
         type: 'PARTICIPANT_JOINED',
         title: 'Participant Joined',
         body: `${participantName} joined the journey`,
-        data: { participantName },
+        data: { journeyName, participantName },
       }),
     );
 
@@ -144,6 +169,7 @@ export class NotificationService {
    */
   async sendArrivalDetected(
     journeyId: string,
+    journeyName: string,
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
@@ -154,7 +180,7 @@ export class NotificationService {
         type: 'ARRIVAL_DETECTED',
         title: 'Arrival Detected',
         body: `${participantName} has arrived at the destination`,
-        data: { participantName },
+        data: { journeyName, participantName },
       }),
     );
 
@@ -180,29 +206,49 @@ export class NotificationService {
 
   /**
    * Mark notification as read
+   * Uses recipientId to scope query and prevent unauthorized access (IDOR protection)
    */
-  async markAsRead(notificationId: string, journeyId: string): Promise<void> {
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('notifications')
-      .doc(notificationId)
-      .update({
-        read: true,
-        readAt: FieldValue.serverTimestamp(),
-      });
+  async markAsRead(notificationId: string, userId: string): Promise<void> {
+    // Query scoped to user's notifications only for security and performance
+    const snapshot = await this.firebaseService.firestore
+      .collectionGroup('notifications')
+      .where('recipientId', '==', userId)
+      .limit(1000) // Reasonable limit per user
+      .get();
+
+    // Find the specific notification by ID
+    const notificationDoc = snapshot.docs.find(doc => doc.id === notificationId);
+
+    if (!notificationDoc) {
+      throw new NotFoundException('Notification not found or you do not have permission to access it');
+    }
+
+    await notificationDoc.ref.update({
+      read: true,
+      readAt: FieldValue.serverTimestamp(),
+    });
   }
 
   /**
    * Delete notification
+   * Uses recipientId to scope query and prevent unauthorized access (IDOR protection)
    */
-  async deleteNotification(notificationId: string, journeyId: string): Promise<void> {
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('notifications')
-      .doc(notificationId)
-      .delete();
+  async deleteNotification(notificationId: string, userId: string): Promise<void> {
+    // Query scoped to user's notifications only for security and performance
+    const snapshot = await this.firebaseService.firestore
+      .collectionGroup('notifications')
+      .where('recipientId', '==', userId)
+      .limit(1000) // Reasonable limit per user
+      .get();
+
+    // Find the specific notification by ID
+    const notificationDoc = snapshot.docs.find(doc => doc.id === notificationId);
+
+    if (!notificationDoc) {
+      throw new NotFoundException('Notification not found or you do not have permission to access it');
+    }
+
+    await notificationDoc.ref.delete();
   }
 
   /**
@@ -219,33 +265,164 @@ export class NotificationService {
   }
 
   /**
-   * Send FCM push notification
-   * TODO: Implement when FCM tokens are registered
+   * Helper method to convert data object to string record for FCM
    */
-  private async sendPushNotification(userId: string, notification: any): Promise<void> {
-    // Implementation requires:
-    // 1. Device token registration endpoint
-    // 2. Store FCM tokens in Firestore
-    // 3. Use Firebase Admin SDK to send messages
+  private convertDataToStringRecord(data: Record<string, any>): Record<string, string> {
+    const stringRecord: Record<string, string> = {};
 
-    // Example implementation:
-    // const userDoc = await this.firebaseService.firestore
-    //   .collection('users')
-    //   .doc(userId)
-    //   .get();
-    //
-    // const fcmToken = userDoc.data()?.fcmToken;
-    // if (!fcmToken) return;
-    //
-    // await this.firebaseService.app.messaging().send({
-    //   token: fcmToken,
-    //   notification: {
-    //     title: notification.title,
-    //     body: notification.body,
-    //   },
-    //   data: notification.data,
-    // });
+    for (const [key, value] of Object.entries(data)) {
+      stringRecord[key] = typeof value === 'string' ? value : JSON.stringify(value);
+    }
 
-    console.log(`Push notification would be sent to user ${userId}`);
+    return stringRecord;
+  }
+
+  /**
+   * Check if user has enabled notifications (has registered FCM token)
+   */
+  async getNotificationPermissionStatus(userId: string): Promise<{
+    enabled: boolean;
+    tokenCount: number;
+  }> {
+    const userDoc = await this.firebaseService.firestore
+      .collection('users')
+      .doc(userId)
+      .get();
+
+    if (!userDoc.exists) {
+      return { enabled: false, tokenCount: 0 };
+    }
+
+    const userData = userDoc.data();
+    const fcmTokens = userData?.fcmTokens || [];
+
+    return {
+      enabled: fcmTokens.length > 0,
+      tokenCount: fcmTokens.length,
+    };
+  }
+
+  /**
+   * Register FCM token for push notifications
+   */
+  async registerFcmToken(
+    userId: string,
+    fcmToken: string,
+    platform?: string,
+    deviceId?: string,
+  ): Promise<{ message: string }> {
+    try {
+      this.logger.log(`Registering FCM token for user: ${userId}`);
+      this.logger.debug(`Platform: ${platform || 'unknown'}`);
+
+      const userRef = this.firebaseService.firestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        this.logger.warn(`User not found: ${userId}`);
+        throw new NotFoundException('User not found');
+      }
+
+      // Get existing FCM tokens array
+      const userData = userDoc.data();
+      const existingTokens = userData?.fcmTokens || [];
+      this.logger.debug(`Existing tokens count: ${existingTokens.length}`);
+
+      // Check if token already exists
+      const tokenExists = existingTokens.some((t: any) => t.token === fcmToken);
+
+      if (!tokenExists) {
+        this.logger.log('Adding new FCM token');
+
+        // Add new token with metadata
+        // Note: Using ISO string instead of FieldValue.serverTimestamp()
+        // because Firestore doesn't allow serverTimestamp in array elements
+        const tokenData = {
+          token: fcmToken,
+          platform: platform || 'unknown',
+          deviceId: deviceId || null,
+          registeredAt: new Date().toISOString(),
+        };
+
+        // Use set with merge to handle cases where fcmTokens field doesn't exist
+        await userRef.set(
+          {
+            fcmTokens: FieldValue.arrayUnion(tokenData),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+
+        this.logger.log(`FCM token registered successfully for user: ${userId}`);
+        return { message: 'FCM token registered successfully' };
+      }
+
+      this.logger.debug('FCM token already registered');
+      return { message: 'FCM token already registered' };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      // Log the actual error for debugging
+      this.logger.error(`FCM token registration error for user ${userId}: ${error.message}`, error.stack);
+      throw new BadRequestException(`Failed to register FCM token: ${error.message}`);
+    }
+  }
+
+  /**
+   * Remove FCM token (e.g., on logout from specific device)
+   */
+  async removeFcmToken(userId: string, fcmToken: string): Promise<{ message: string }> {
+    try {
+      const userRef = this.firebaseService.firestore.collection('users').doc(userId);
+      const userDoc = await userRef.get();
+
+      if (!userDoc.exists) {
+        throw new NotFoundException('User not found');
+      }
+
+      const userData = userDoc.data();
+      const existingTokens = userData?.fcmTokens || [];
+
+      // Filter out the token to remove
+      const updatedTokens = existingTokens.filter((t: any) => t.token !== fcmToken);
+
+      // Use set with merge to avoid issues
+      await userRef.set(
+        {
+          fcmTokens: updatedTokens,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      return { message: 'FCM token removed successfully' };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      this.logger.error(`FCM token removal error for user ${userId}: ${error.message}`, error.stack);
+      throw new BadRequestException('Failed to remove FCM token');
+    }
+  }
+
+  /**
+   * Get all FCM tokens for a user (used by FcmService)
+   */
+  async getUserFcmTokens(userId: string): Promise<string[]> {
+    const userDoc = await this.firebaseService.firestore
+      .collection('users')
+      .doc(userId)
+      .get();
+
+    if (!userDoc.exists) {
+      return [];
+    }
+
+    const userData = userDoc.data();
+    const fcmTokens = userData?.fcmTokens || [];
+
+    // Return just the token strings
+    return fcmTokens.map((t: any) => t.token);
   }
 }

@@ -3,12 +3,14 @@ import { ConfigService } from '@nestjs/config';
 import * as admin from 'firebase-admin';
 import { Firestore } from 'firebase-admin/firestore';
 import { Auth } from 'firebase-admin/auth';
+import { Messaging } from 'firebase-admin/messaging';
 
 @Injectable()
 export class FirebaseService implements OnModuleInit {
   private app: admin.app.App;
   public firestore: Firestore;
   public auth: Auth;
+  public messaging: Messaging;
 
   constructor(private configService: ConfigService) {}
 
@@ -25,6 +27,7 @@ export class FirebaseService implements OnModuleInit {
     this.app = admin.initializeApp(firebaseConfig);
     this.firestore = this.app.firestore();
     this.auth = this.app.auth();
+    this.messaging = this.app.messaging();
   }
 
   getFirestore(): Firestore {
@@ -33,5 +36,9 @@ export class FirebaseService implements OnModuleInit {
 
   getAuth(): Auth {
     return this.auth;
+  }
+
+  getMessaging(): Messaging {
+    return this.messaging;
   }
 }

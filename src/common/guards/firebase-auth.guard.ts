@@ -15,7 +15,7 @@ export class FirebaseAuthGuard implements CanActivate {
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
-      throw new UnauthorizedException('No authentication token provided');
+      throw new UnauthorizedException('Please login again');
     }
 
     try {
@@ -33,7 +33,7 @@ export class FirebaseAuthGuard implements CanActivate {
         const tokensValidAfter = new Date(userRecord.tokensValidAfterTime);
 
         if (tokenIssuedAt < tokensValidAfter) {
-          throw new UnauthorizedException('Token has been revoked. Please login again.');
+          throw new UnauthorizedException('Please login again');
         }
       }
 
@@ -47,7 +47,7 @@ export class FirebaseAuthGuard implements CanActivate {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      throw new UnauthorizedException('Invalid authentication token');
+      throw new UnauthorizedException('Please login again');
     }
   }
 
