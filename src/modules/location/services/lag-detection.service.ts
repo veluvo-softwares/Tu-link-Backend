@@ -3,12 +3,32 @@ import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../../shared/firebase/firebase.service';
 import { RedisService } from '../../../shared/redis/redis.service';
 import { MapsService } from '../../maps/services/maps.service';
-import { LocationUpdate } from '../../../shared/interfaces/location.interface';
+import {
+  LocationUpdate,
+  CachedLocation,
+} from '../../../shared/interfaces/location.interface';
 import { Journey } from '../../../shared/interfaces/journey.interface';
 import { LagAlert } from '../../../shared/interfaces/notification.interface';
 import { LagSeverity } from '../../../types/notification.type';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
-import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
+import {
+  FieldValue,
+  GeoPoint,
+  DocumentSnapshot,
+  Timestamp,
+} from 'firebase-admin/firestore';
+
+interface LagAlertData {
+  journeyId: string;
+  participantId: string;
+  userId: string;
+  distanceFromLeader: number;
+  leaderLocation: GeoPoint;
+  followerLocation: GeoPoint;
+  severity: LagSeverity;
+  isActive: boolean;
+  createdAt: Timestamp;
+}
 
 @Injectable()
 export class LagDetectionService {
@@ -32,22 +52,22 @@ export class LagDetectionService {
       return null;
     }
 
-    const leaderLocation = await this.redisService.getCachedLocation(
-      journey.id,
-      leaderId,
-    );
+    const leaderLocation: CachedLocation | null =
+      await this.redisService.getCachedLocation(journey.id, leaderId);
 
     if (!leaderLocation) {
       return null;
     }
 
     // Calculate distance using Haversine formula
+    const leaderCoords = {
+      latitude: leaderLocation.location.latitude,
+      longitude: leaderLocation.location.longitude,
+    };
+
     const distance = DistanceUtils.haversineDistance(
       followerUpdate.location,
-      {
-        latitude: leaderLocation.location.latitude,
-        longitude: leaderLocation.location.longitude,
-      },
+      leaderCoords,
     );
 
     // Check if distance exceeds threshold
@@ -82,7 +102,8 @@ export class LagDetectionService {
    * Calculate lag severity based on distance
    */
   private calculateSeverity(distance: number): LagSeverity {
-    const criticalThreshold = this.configService.get('app.criticalLagMeters');
+    const criticalThreshold =
+      this.configService.get<number>('app.criticalLagMeters') ?? 1000;
     return distance > criticalThreshold ? 'CRITICAL' : 'WARNING';
   }
 
@@ -104,7 +125,7 @@ export class LagDetectionService {
       .collection('lag_alerts')
       .doc();
 
-    const alertData = {
+    const alertData: LagAlertData = {
       journeyId: data.journeyId,
       participantId: data.participantId,
       userId: data.userId,
@@ -113,7 +134,7 @@ export class LagDetectionService {
       followerLocation: data.followerLocation,
       severity: data.severity,
       isActive: true,
-      createdAt: FieldValue.serverTimestamp() as any,
+      createdAt: FieldValue.serverTimestamp() as Timestamp,
     };
 
     await alertRef.set(alertData);
@@ -136,7 +157,7 @@ export class LagDetectionService {
       .where('isActive', '==', true)
       .get();
 
-    const updates = snapshot.docs.map((doc) =>
+    const updates = snapshot.docs.map((doc: DocumentSnapshot) =>
       doc.ref.update({
         isActive: false,
         resolvedAt: FieldValue.serverTimestamp(),
@@ -157,7 +178,7 @@ export class LagDetectionService {
       .where('isActive', '==', true)
       .get();
 
-    return snapshot.docs.map((doc) => ({
+    return snapshot.docs.map((doc: DocumentSnapshot) => ({
       id: doc.id,
       ...doc.data(),
     })) as LagAlert[];

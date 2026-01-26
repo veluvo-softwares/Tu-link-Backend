@@ -1,0 +1,51 @@
+name: Deploy to Development
+
+on:
+  push:
+    branches: [ dev ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: development
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Build application
+      run: npm run build
+
+    - name: Build Docker image
+      run: |
+        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
+        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev .
+        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev
+
+    - name: Deploy to Digital Ocean
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.DEV_HOST }}
+        username: ${{ secrets.DEV_USERNAME }}
+        key: ${{ secrets.DEV_SSH_KEY }}
+        port: ${{ secrets.DEV_SSH_PORT }}
+        script: |
+          cd /opt/tulink/dev
+          git pull origin dev
+          docker-compose -f docker-compose.dev.yml pull
+          docker-compose -f docker-compose.dev.yml up -d --remove-orphans
+          docker image prune -f
+
+    - name: Health check
+      run: |
+        sleep 30
+        curl -f https://api.dev.tulink.xyz/health || exit 1

@@ -1,6 +1,7 @@
 import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
+import { CachedLocation } from '../interfaces/location.interface';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -8,7 +9,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private configService: ConfigService) {}
 
-  async onModuleInit() {
+  onModuleInit() {
     this.client = new Redis({
       host: this.configService.get('redis.host'),
       port: this.configService.get('redis.port'),
@@ -105,7 +106,17 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return await this.client.smembers('journey:active');
   }
 
-  async addParticipantToJourney(
+  async setJourneyLeader(journeyId: string, leaderId: string): Promise<void> {
+    const key = `journey:${journeyId}:leader`;
+    await this.client.set(key, leaderId);
+  }
+
+  async getJourneyLeader(journeyId: string): Promise<string | null> {
+    const key = `journey:${journeyId}:leader`;
+    return await this.client.get(key);
+  }
+
+  async addJourneyParticipant(
     journeyId: string,
     participantId: string,
   ): Promise<void> {
@@ -113,7 +124,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.sadd(key, participantId);
   }
 
-  async removeParticipantFromJourney(
+  async removeJourneyParticipant(
     journeyId: string,
     participantId: string,
   ): Promise<void> {
@@ -126,21 +137,11 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return await this.client.smembers(key);
   }
 
-  async setJourneyLeader(journeyId: string, leaderId: string): Promise<void> {
-    const key = `journey:${journeyId}:leader`;
-    await this.client.set(key, leaderId);
-  }
-
-  async getJourneyLeader(journeyId: string): Promise<string | null> {
-    const key = `journey:${journeyId}:leader`;
-    return await this.client.get(key);
-  }
-
   // Location caching
   async cacheLocation(
     journeyId: string,
     participantId: string,
-    location: any,
+    location: CachedLocation,
   ): Promise<void> {
     const key = `journey:${journeyId}:location:${participantId}`;
     await this.client.setex(key, 300, JSON.stringify(location)); // 5 minutes TTL
@@ -149,10 +150,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async getCachedLocation(
     journeyId: string,
     participantId: string,
-  ): Promise<any | null> {
+  ): Promise<CachedLocation | null> {
     const key = `journey:${journeyId}:location:${participantId}`;
     const result = await this.client.get(key);
-    return result ? JSON.parse(result) : null;
+    return result ? (JSON.parse(result) as CachedLocation) : null;
   }
 
   // WebSocket room management
@@ -189,43 +190,53 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     await this.client.del(key);
   }
 
-  // Rate limiting
-  async checkRateLimit(userId: string, limit: number): Promise<boolean> {
-    const key = `ratelimit:location:${userId}`;
-    const current = await this.client.incr(key);
-
-    if (current === 1) {
-      await this.client.expire(key, 60); // 1 minute
-    }
-
-    return current <= limit;
-  }
-
-  // Pending deliveries for retry
+  // Pending delivery management for acknowledgments
   async addPendingDelivery(
     journeyId: string,
     participantId: string,
     update: any,
   ): Promise<void> {
-    const key = `journey:${journeyId}:pending:${participantId}`;
-    await this.client.rpush(key, JSON.stringify(update));
-    await this.client.expire(key, 300); // 5 minutes TTL
+    const key = `pending:${journeyId}:${participantId}`;
+    await this.client.lpush(key, JSON.stringify(update));
+    await this.client.expire(key, 3600); // 1 hour TTL
   }
 
   async getPendingDeliveries(
     journeyId: string,
     participantId: string,
   ): Promise<any[]> {
-    const key = `journey:${journeyId}:pending:${participantId}`;
+    const key = `pending:${journeyId}:${participantId}`;
     const results = await this.client.lrange(key, 0, -1);
-    return results.map((r) => JSON.parse(r));
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+    return results.map((item) => JSON.parse(item));
   }
 
   async removePendingDelivery(
     journeyId: string,
     participantId: string,
   ): Promise<void> {
-    const key = `journey:${journeyId}:pending:${participantId}`;
+    const key = `pending:${journeyId}:${participantId}`;
     await this.client.del(key);
+  }
+
+  // Rate limiting
+  async checkRateLimit(
+    key: string,
+    limit: number,
+    window: number,
+  ): Promise<boolean> {
+    const count = await this.client.incr(key);
+    if (count === 1) {
+      await this.client.expire(key, window);
+    }
+    return count <= limit;
+  }
+
+  // Cleanup utilities
+  async clearJourneyCache(journeyId: string): Promise<void> {
+    const keys = await this.client.keys(`journey:${journeyId}:*`);
+    if (keys.length > 0) {
+      await this.client.del(...keys);
+    }
   }
 }

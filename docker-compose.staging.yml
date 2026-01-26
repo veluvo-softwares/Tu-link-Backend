@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  tulink-backend:
+    container_name: tulink-backend-staging
+    environment:
+      - NODE_ENV=staging
+      - PORT=3002
+    ports:
+      - "3002:3000"
+
+  redis:
+    container_name: tulink-redis-staging
+    ports:
+      - "6381:6379"
+
+  nginx:
+    profiles:
+      - staging

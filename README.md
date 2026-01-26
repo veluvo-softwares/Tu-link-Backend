@@ -1,6 +1,19 @@
-# Tu-link - Convoy Coordination Backend 🚀
+# Tu-Link Backend API
 
-Real-time convoy coordination platform built with NestJS, featuring WebSocket support, Firebase integration, and Uber-inspired real-time patterns.
+A comprehensive convoy coordination platform backend built with NestJS, providing real-time location tracking, journey management, and Firebase push notifications.
+
+## 🚀 Quick Start
+
+### Multi-Environment Deployment Ready
+- **Development**: `https://api.dev.tulink.xyz`
+- **Staging**: `https://api.staging.tulink.xyz`  
+- **Production**: `https://api.tulink.xyz`
+
+### One-Command Deployment
+```bash
+# Deploy to any environment
+./scripts/deploy.sh [dev|staging|prod]
+```
 
 ## Features ✨
 

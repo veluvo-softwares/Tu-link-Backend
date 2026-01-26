@@ -130,4 +130,4 @@ For real-time location updates, connect to:
     🔌 WebSocket Gateway: ws://localhost:${port}
   `);
 }
-bootstrap();
+void bootstrap();

@@ -1,3 +1,6 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   WebSocketGateway,
   WebSocketServer,
@@ -26,7 +29,9 @@ import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
   transports: ['websocket'],
 })
 @UseFilters(new WsExceptionFilter())
-export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class LocationGateway
+  implements OnGatewayConnection, OnGatewayDisconnect
+{
   @WebSocketServer()
   server: Server;
 
@@ -47,7 +52,9 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
   async handleConnection(client: Socket) {
     try {
       // Extract token from handshake
-      const token = client.handshake.auth.token || client.handshake.headers.authorization?.split(' ')[1];
+      const token =
+        client.handshake.auth.token ||
+        client.handshake.headers.authorization?.split(' ')[1];
 
       if (!token) {
         client.emit('error', { message: 'No authentication token provided' });
@@ -103,7 +110,7 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
     // Remove from journey room
     if (journeyId) {
       await this.redisService.removeSocketFromRoom(journeyId, client.id);
-      client.leave(`journey:${journeyId}`);
+      void client.leave(`journey:${journeyId}`);
 
       // Update participant connection status
       if (userId) {
@@ -114,10 +121,12 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
         );
 
         // Notify other participants
-        this.server.to(`journey:${journeyId}`).emit('participant-disconnected', {
-          userId,
-          timestamp: Date.now(),
-        });
+        this.server
+          .to(`journey:${journeyId}`)
+          .emit('participant-disconnected', {
+            userId,
+            timestamp: Date.now(),
+          });
       }
     }
 
@@ -138,7 +147,10 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     try {
       // Verify participant membership
-      const isParticipant = await this.participantService.isParticipant(journeyId, userId);
+      const isParticipant = await this.participantService.isParticipant(
+        journeyId,
+        userId,
+      );
       if (!isParticipant) {
         throw new WsException('Not a participant of this journey');
       }
@@ -153,7 +165,11 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       await this.redisService.addSocketToRoom(journeyId, client.id);
 
       // Update participant connection status
-      await this.participantService.updateConnectionStatus(journeyId, userId, 'CONNECTED');
+      await this.participantService.updateConnectionStatus(
+        journeyId,
+        userId,
+        'CONNECTED',
+      );
       await this.redisService.setConnectionStatus(userId, true);
 
       console.log(`User ${userId} joined journey ${journeyId}`);
@@ -172,7 +188,10 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       });
 
       // Send latest locations to the newly joined participant
-      const latestLocations = await this.locationService.getLatestLocations(journeyId, userId);
+      const latestLocations = await this.locationService.getLatestLocations(
+        journeyId,
+        userId,
+      );
       client.emit('latest-locations', latestLocations);
     } catch (error) {
       client.emit('error', {
@@ -201,7 +220,11 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
       await this.redisService.removeSocketFromRoom(journeyId, client.id);
 
       // Update participant connection status
-      await this.participantService.updateConnectionStatus(journeyId, userId, 'DISCONNECTED');
+      await this.participantService.updateConnectionStatus(
+        journeyId,
+        userId,
+        'DISCONNECTED',
+      );
 
       // Clear from client data
       client.data.journeyId = null;
@@ -240,7 +263,10 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
 
     try {
       // Process the location update
-      const result = await this.locationService.processLocationUpdate(userId, payload);
+      const result = await this.locationService.processLocationUpdate(
+        userId,
+        payload,
+      );
 
       if (!result.success) {
         // Throttled - don't broadcast
@@ -284,10 +310,12 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
 
       // Send arrival notification if detected
       if (result.arrivalDetected) {
-        this.server.to(`journey:${payload.journeyId}`).emit('arrival-detected', {
-          userId,
-          timestamp: Date.now(),
-        });
+        this.server
+          .to(`journey:${payload.journeyId}`)
+          .emit('arrival-detected', {
+            userId,
+            timestamp: Date.now(),
+          });
       }
     } catch (error) {
       client.emit('error', {
@@ -382,6 +410,7 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Broadcast journey started event
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async broadcastJourneyStarted(journeyId: string, journey: any) {
     this.server.to(`journey:${journeyId}`).emit('journey-started', {
       journey,
@@ -392,6 +421,7 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
   /**
    * Broadcast journey ended event
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async broadcastJourneyEnded(journeyId: string, journey: any) {
     this.server.to(`journey:${journeyId}`).emit('journey-ended', {
       journey,
@@ -403,6 +433,7 @@ export class LocationGateway implements OnGatewayConnection, OnGatewayDisconnect
    * Start heartbeat monitoring for a client
    */
   private startHeartbeatMonitoring(client: Socket) {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const heartbeatInterval = this.configService.get('app.heartbeatIntervalMs');
     const heartbeatTimeout = this.configService.get('app.heartbeatTimeoutMs');
 

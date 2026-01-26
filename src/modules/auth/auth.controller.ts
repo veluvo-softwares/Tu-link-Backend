@@ -8,7 +8,12 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -33,14 +38,20 @@ export class AuthController {
 - User profile data
 - Firebase ID token (valid for 1 hour)
 - Refresh token
-- Token expiration time`
+- Token expiration time`,
   })
   @ApiResponse({
     status: 201,
-    description: 'User successfully registered. Returns user data with tokens.'
+    description: 'User successfully registered. Returns user data with tokens.',
   })
-  @ApiResponse({ status: 409, description: 'Email or phone number already in use' })
-  @ApiResponse({ status: 400, description: 'Validation error - check phone number format (E.164)' })
+  @ApiResponse({
+    status: 409,
+    description: 'Email or phone number already in use',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error - check phone number format (E.164)',
+  })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
@@ -55,9 +66,12 @@ export class AuthController {
 - User profile data
 - Firebase ID token (valid for 1 hour)
 - Refresh token
-- Token expiration time`
+- Token expiration time`,
   })
-  @ApiResponse({ status: 200, description: 'Login successful. Returns user data with tokens.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful. Returns user data with tokens.',
+  })
   @ApiResponse({ status: 401, description: 'Invalid email or password' })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
@@ -69,9 +83,12 @@ export class AuthController {
     summary: 'Refresh authentication token',
     description: `Get a new ID token before the current one expires (1 hour).
 
-**Requires:** Valid refresh token in request body`
+**Requires:** Valid refresh token in request body`,
   })
-  @ApiResponse({ status: 200, description: 'Token refreshed successfully. Returns new ID token.' })
+  @ApiResponse({
+    status: 200,
+    description: 'Token refreshed successfully. Returns new ID token.',
+  })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
   async refresh(@Body() refreshTokenDto: { refreshToken: string }) {
     return this.authService.refreshToken(refreshTokenDto.refreshToken);
@@ -85,10 +102,16 @@ export class AuthController {
     summary: 'Logout and revoke all tokens',
     description: `Revoke all refresh tokens for the current user. Existing ID tokens will become invalid.
 
-**Note:** All active sessions will be terminated. User must login again to get new tokens.`
+**Note:** All active sessions will be terminated. User must login again to get new tokens.`,
   })
-  @ApiResponse({ status: 200, description: 'Logout successful. All tokens revoked.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - invalid or expired token' })
+  @ApiResponse({
+    status: 200,
+    description: 'Logout successful. All tokens revoked.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or expired token',
+  })
   async logout(@CurrentUser('uid') uid: string) {
     return this.authService.logout(uid);
   }
@@ -106,10 +129,13 @@ export class AuthController {
 - Display name
 - Phone number
 - Account creation date
-- Last update date`
+- Last update date`,
   })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - invalid or expired token' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or expired token',
+  })
   @ApiResponse({ status: 404, description: 'User profile not found' })
   async getProfile(@CurrentUser('uid') uid: string) {
     return this.authService.getProfile(uid);
@@ -126,12 +152,22 @@ export class AuthController {
 - Display name
 - Phone number (must be in E.164 format)
 
-**Returns:** Updated user profile with new \`updatedAt\` timestamp`
+**Returns:** Updated user profile with new \`updatedAt\` timestamp`,
   })
-  @ApiResponse({ status: 200, description: 'Profile updated successfully. Returns updated profile with updatedAt timestamp.' })
-  @ApiResponse({ status: 401, description: 'Unauthorized - invalid or expired token' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Profile updated successfully. Returns updated profile with updatedAt timestamp.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or expired token',
+  })
   @ApiResponse({ status: 404, description: 'User profile not found' })
-  @ApiResponse({ status: 400, description: 'Validation error - check phone number format (E.164)' })
+  @ApiResponse({
+    status: 400,
+    description: 'Validation error - check phone number format (E.164)',
+  })
   async updateProfile(
     @CurrentUser('uid') uid: string,
     @Body() updateProfileDto: UpdateProfileDto,

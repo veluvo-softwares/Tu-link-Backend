@@ -4,7 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export class RegisterFcmTokenDto {
   @ApiProperty({
     description: 'Firebase Cloud Messaging token for push notifications',
-    example: 'fGxN8... [FCM Registration Token]'
+    example: 'fGxN8... [FCM Registration Token]',
   })
   @IsString()
   @IsNotEmpty({ message: 'FCM token is required' })
@@ -14,17 +14,19 @@ export class RegisterFcmTokenDto {
     description: 'Device platform (android, ios, web)',
     example: 'android',
     enum: ['android', 'ios', 'web'],
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
-  @IsEnum(['android', 'ios', 'web'], { message: 'Platform must be android, ios, or web' })
+  @IsEnum(['android', 'ios', 'web'], {
+    message: 'Platform must be android, ios, or web',
+  })
   platform?: string;
 
   @ApiProperty({
     description: 'Device identifier (optional)',
     example: 'device-uuid-123',
-    required: false
+    required: false,
   })
   @IsString()
   @IsOptional()
@@ -34,7 +36,7 @@ export class RegisterFcmTokenDto {
 export class RemoveFcmTokenDto {
   @ApiProperty({
     description: 'FCM token to remove',
-    example: 'fGxN8... [FCM Registration Token]'
+    example: 'fGxN8... [FCM Registration Token]',
   })
   @IsString()
   @IsNotEmpty({ message: 'FCM token is required' })

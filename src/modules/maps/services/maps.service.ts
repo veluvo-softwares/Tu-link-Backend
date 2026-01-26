@@ -3,6 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { Client, LatLng } from '@googlemaps/google-maps-services-js';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
 
+interface RouteInfo {
+  polyline: string;
+  distance: number;
+  duration: number;
+}
+
 @Injectable()
 export class MapsService {
   private client: Client;
@@ -87,6 +93,7 @@ export class MapsService {
 
       const element = response.data.rows[0]?.elements[0];
 
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-comparison
       if (element && element.status === 'OK') {
         return {
           distance: element.distance.value, // meters
@@ -107,7 +114,7 @@ export class MapsService {
   async getDirections(
     from: { latitude: number; longitude: number },
     to: { latitude: number; longitude: number },
-  ): Promise<any | null> {
+  ): Promise<RouteInfo | null> {
     try {
       const response = await this.client.directions({
         params: {
@@ -118,10 +125,11 @@ export class MapsService {
       });
 
       if (response.data.routes.length > 0) {
+        const route = response.data.routes[0];
         return {
-          polyline: response.data.routes[0].overview_polyline.points,
-          distance: response.data.routes[0].legs[0].distance.value,
-          duration: response.data.routes[0].legs[0].duration.value,
+          polyline: route.overview_polyline.points,
+          distance: route.legs[0].distance.value,
+          duration: route.legs[0].duration.value,
         };
       }
 

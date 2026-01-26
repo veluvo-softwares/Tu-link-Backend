@@ -7,7 +7,10 @@ import {
   Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
-import { ApiErrorResponse, ValidationErrorDetail } from '../interfaces/api-response.interface';
+import {
+  ApiErrorResponse,
+  ValidationErrorDetail,
+} from '../interfaces/api-response.interface';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
@@ -19,7 +22,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     const statusCode = this.getStatusCode(exception);
-    const errorResponse = this.buildErrorResponse(exception, request, statusCode);
+    const errorResponse = this.buildErrorResponse(
+      exception,
+      request,
+      statusCode,
+    );
 
     // Log error details
     this.logger.error(
@@ -47,20 +54,27 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const exceptionResponse = exception.getResponse();
 
       // Handle validation errors
-      if (typeof exceptionResponse === 'object' && 'message' in exceptionResponse) {
-        const response = exceptionResponse as any;
+      if (
+        typeof exceptionResponse === 'object' &&
+        'message' in exceptionResponse
+      ) {
+        const response = exceptionResponse as {
+          message: string | string[];
+          error?: string;
+        };
 
         // Check if it's a validation error
         if (Array.isArray(response.message)) {
-          const validationErrors: ValidationErrorDetail[] = response.message.map((msg: string) => {
-            // Parse validation error messages
-            const parts = msg.split(' ');
-            return {
-              field: parts[0] || 'unknown',
-              message: msg,
-              constraint: response.error || 'validation_failed',
-            };
-          });
+          const validationErrors: ValidationErrorDetail[] =
+            response.message.map((msg) => {
+              // Parse validation error messages
+              const parts = msg.split(' ');
+              return {
+                field: parts[0] || 'unknown',
+                message: msg,
+                constraint: response.error || 'validation_failed',
+              };
+            });
 
           return {
             success: false,
@@ -73,10 +87,15 @@ export class HttpExceptionFilter implements ExceptionFilter {
           };
         }
 
+        const messageString =
+          typeof response.message === 'string'
+            ? response.message
+            : exception.message;
+
         return {
           success: false,
           statusCode,
-          message: response.message || exception.message,
+          message: messageString || exception.message,
           error: {
             code: this.getErrorCode(exception, response),
             details: response.error || null,
@@ -96,7 +115,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
     // Handle Firebase errors
     if (this.isFirebaseError(exception)) {
-      const firebaseError = exception as any;
+      const firebaseError = exception as {
+        errorInfo?: { code?: string; message?: string };
+      };
       return {
         success: false,
         statusCode,
@@ -123,11 +144,14 @@ export class HttpExceptionFilter implements ExceptionFilter {
     };
   }
 
-  private getErrorCode(exception: HttpException, response?: any): string {
+  private getErrorCode(
+    exception: HttpException,
+    response?: { error?: string },
+  ): string {
     const status = exception.getStatus();
 
     // Use response error code if available
-    if (response?.error) {
+    if (response?.error && typeof response.error === 'string') {
       return response.error.toUpperCase().replace(/\s+/g, '_');
     }
 
@@ -155,7 +179,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
     );
   }
 
-  private getFirebaseErrorMessage(error: any): string {
+  private getFirebaseErrorMessage(error: {
+    errorInfo?: { code?: string; message?: string };
+  }): string {
     const errorCode = error.errorInfo?.code;
 
     // Map Firebase error codes to user-friendly messages
@@ -163,13 +189,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       'auth/email-already-exists': 'Email address is already in use',
       'auth/invalid-email': 'Invalid email address',
       'auth/invalid-password': 'Password must be at least 6 characters',
-      'auth/invalid-phone-number': 'Invalid phone number format. Use E.164 format (e.g., +254712345678)',
+      'auth/invalid-phone-number':
+        'Invalid phone number format. Use E.164 format (e.g., +254712345678)',
       'auth/phone-number-already-exists': 'Phone number is already in use',
       'auth/user-not-found': 'User not found',
       'auth/wrong-password': 'Invalid credentials',
       'auth/too-many-requests': 'Too many requests. Please try again later',
     };
 
-    return errorMessages[errorCode] || error.errorInfo?.message || 'An error occurred';
+    return (
+      (errorCode ? errorMessages[errorCode] : undefined) ||
+      error.errorInfo?.message ||
+      'An error occurred'
+    );
   }
 }

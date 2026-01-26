@@ -14,8 +14,8 @@ export class FirebaseService implements OnModuleInit {
 
   constructor(private configService: ConfigService) {}
 
-  async onModuleInit() {
-    const firebaseConfig = {
+  onModuleInit() {
+    const firebaseConfig: admin.AppOptions = {
       credential: admin.credential.cert({
         projectId: this.configService.get('firebase.projectId'),
         clientEmail: this.configService.get('firebase.clientEmail'),

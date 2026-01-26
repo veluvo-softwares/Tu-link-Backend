@@ -6,12 +6,23 @@ import {
 } from '@nestjs/common';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 
+interface AuthRequest {
+  headers: {
+    authorization?: string;
+  };
+  user?: {
+    uid: string;
+    email?: string;
+    emailVerified?: boolean;
+  };
+}
+
 @Injectable()
 export class FirebaseAuthGuard implements CanActivate {
   constructor(private firebaseService: FirebaseService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    const request = context.switchToHttp().getRequest();
+    const request = context.switchToHttp().getRequest<AuthRequest>();
     const token = this.extractTokenFromHeader(request);
 
     if (!token) {
@@ -20,11 +31,12 @@ export class FirebaseAuthGuard implements CanActivate {
 
     try {
       // Verify the ID token
-      const decodedToken =
-        await this.firebaseService.auth.verifyIdToken(token);
+      const decodedToken = await this.firebaseService.auth.verifyIdToken(token);
 
       // Get user record to check if tokens have been revoked
-      const userRecord = await this.firebaseService.auth.getUser(decodedToken.uid);
+      const userRecord = await this.firebaseService.auth.getUser(
+        decodedToken.uid,
+      );
 
       // Check if the token was issued before the revocation time
       // tokensValidAfterTime is set when revokeRefreshTokens() is called
@@ -51,7 +63,7 @@ export class FirebaseAuthGuard implements CanActivate {
     }
   }
 
-  private extractTokenFromHeader(request: any): string | null {
+  private extractTokenFromHeader(request: AuthRequest): string | null {
     const authHeader = request.headers.authorization;
     if (!authHeader) {
       return null;

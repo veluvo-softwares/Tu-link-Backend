@@ -12,9 +12,17 @@ import {
   HttpStatus,
   ParseIntPipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { NotificationService } from './notification.service';
-import { RegisterFcmTokenDto, RemoveFcmTokenDto } from './dto/register-fcm-token.dto';
+import {
+  RegisterFcmTokenDto,
+  RemoveFcmTokenDto,
+} from './dto/register-fcm-token.dto';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -39,7 +47,7 @@ export class NotificationController {
 
 **Use Case:**
 - Call this on app launch to determine whether to show notification permission prompt
-- If \`enabled: false\`, show prompt to enable notifications`
+- If \`enabled: false\`, show prompt to enable notifications`,
   })
   @ApiResponse({
     status: 200,
@@ -47,9 +55,9 @@ export class NotificationController {
     schema: {
       example: {
         enabled: true,
-        tokenCount: 2
-      }
-    }
+        tokenCount: 2,
+      },
+    },
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getNotificationPermissionStatus(@CurrentUser('uid') userId: string) {
@@ -84,16 +92,16 @@ export class NotificationController {
 - Tokens are stored per device (supports multiple devices per user)
 - Same token can only be registered once
 - Include platform and deviceId for better tracking
-- Invalid tokens are automatically cleaned up`
+- Invalid tokens are automatically cleaned up`,
   })
   @ApiResponse({
     status: 201,
     description: 'FCM token registered successfully',
     schema: {
       example: {
-        message: 'FCM token registered successfully'
-      }
-    }
+        message: 'FCM token registered successfully',
+      },
+    },
   })
   @ApiResponse({ status: 400, description: 'Failed to register FCM token' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -126,16 +134,16 @@ export class NotificationController {
 - Uninstalling the app (call before uninstall if possible)
 
 **Multi-Device Support:**
-Users can have multiple tokens (one per device). This only removes the specified token, other devices will continue receiving notifications.`
+Users can have multiple tokens (one per device). This only removes the specified token, other devices will continue receiving notifications.`,
   })
   @ApiResponse({
     status: 200,
     description: 'FCM token removed successfully',
     schema: {
       example: {
-        message: 'FCM token removed successfully'
-      }
-    }
+        message: 'FCM token removed successfully',
+      },
+    },
   })
   @ApiResponse({ status: 400, description: 'Failed to remove FCM token' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
@@ -144,7 +152,10 @@ Users can have multiple tokens (one per device). This only removes the specified
     @CurrentUser('uid') userId: string,
     @Body() removeFcmTokenDto: RemoveFcmTokenDto,
   ) {
-    return this.notificationService.removeFcmToken(userId, removeFcmTokenDto.fcmToken);
+    return this.notificationService.removeFcmToken(
+      userId,
+      removeFcmTokenDto.fcmToken,
+    );
   }
 
   /**
@@ -153,9 +164,13 @@ Users can have multiple tokens (one per device). This only removes the specified
   @Get()
   @ApiOperation({
     summary: 'Get user notifications',
-    description: 'Retrieve all notifications for the current user with optional limit'
+    description:
+      'Retrieve all notifications for the current user with optional limit',
   })
-  @ApiResponse({ status: 200, description: 'Notifications retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications retrieved successfully',
+  })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getUserNotifications(
     @CurrentUser('uid') userId: string,
@@ -187,7 +202,7 @@ Users can have multiple tokens (one per device). This only removes the specified
     return {
       success: true,
       statusCode: 200,
-      message: 'Notification marked as read'
+      message: 'Notification marked as read',
     };
   }
 
@@ -206,7 +221,7 @@ Users can have multiple tokens (one per device). This only removes the specified
     return {
       success: true,
       statusCode: 200,
-      message: 'Notification deleted successfully'
+      message: 'Notification deleted successfully',
     };
   }
 }

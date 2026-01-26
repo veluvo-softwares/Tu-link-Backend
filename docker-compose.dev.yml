@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  tulink-backend:
+    build:
+      target: development
+    container_name: tulink-backend-dev
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm run start:dev
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+    ports:
+      - "3001:3000"
+
+  redis:
+    container_name: tulink-redis-dev
+    ports:
+      - "6380:6379"

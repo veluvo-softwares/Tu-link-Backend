@@ -1,8 +1,5 @@
 import { Timestamp, GeoPoint } from 'firebase-admin/firestore';
-import {
-  NotificationType,
-  LagSeverity,
-} from '../../types/notification.type';
+import { NotificationType, LagSeverity } from '../../types/notification.type';
 
 export interface Notification {
   id: string;
