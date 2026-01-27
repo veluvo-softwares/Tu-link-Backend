@@ -4,11 +4,12 @@ on:
   push:
     branches:
       - dev
-      - staging
+      - stage
       - prod
+      - main  # Include main for production deployments
   pull_request:
     branches:
-      - staging
+      - stage
       - prod
 
 jobs:
@@ -62,7 +63,7 @@ jobs:
 
   # Deploy to staging
   deploy-staging:
-    if: github.ref == 'refs/heads/staging'
+    if: github.ref == 'refs/heads/stage'
     needs: test
     runs-on: ubuntu-latest
     environment: staging
@@ -77,24 +78,24 @@ jobs:
           script: |
             cd /opt/tulink
             git fetch origin
-            git checkout staging
-            git pull origin staging
+            git checkout stage
+            git pull origin stage
             ./scripts/deploy.sh staging
 
   # Deploy to production (requires manual approval)
   deploy-prod:
-    if: github.ref == 'refs/heads/prod'
+    if: github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/main'
     needs: test
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Deploy to Production
+      - name: Deploy to Production DigitalOcean Droplet
         uses: appleboy/ssh-action@v1.0.0
         with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USERNAME }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          port: ${{ secrets.PROD_PORT || 22 }}
+          host: ${{ secrets.DROPLET_HOST }}
+          username: ${{ secrets.DROPLET_USERNAME }}
+          key: ${{ secrets.DROPLET_SSH_KEY }}
+          port: ${{ secrets.DROPLET_PORT || 22 }}
           script: |
             cd /opt/tulink
             git fetch origin
