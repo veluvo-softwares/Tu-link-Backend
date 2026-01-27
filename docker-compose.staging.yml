@@ -1,19 +1,80 @@
 version: '3.8'
 
 services:
+  # Tu-Link Backend Application - Staging
   tulink-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
     container_name: tulink-backend-staging
     environment:
       - NODE_ENV=staging
-      - PORT=3002
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env.staging
     ports:
-      - "3002:3000"
+      - "3001:3000"  # Different port to avoid conflicts
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tulink-network
+    restart: unless-stopped
+    volumes:
+      - ./logs:/usr/src/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
 
+  # Redis Cache Database - Staging
   redis:
+    image: redis:7-alpine
     container_name: tulink-redis-staging
     ports:
-      - "6381:6379"
+      - "127.0.0.1:6380:6379"  # Different port for staging
+    volumes:
+      - redis_data_staging:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - tulink-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
 
+  # Nginx Reverse Proxy - Staging
   nginx:
-    profiles:
-      - staging
+    image: nginx:alpine
+    container_name: tulink-nginx-staging
+    ports:
+      - "8080:80"    # Different ports for staging
+      - "8443:443"
+    volumes:
+      - ./nginx/conf.d/staging.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/ssl-staging:/etc/nginx/ssl:ro
+      - ./nginx/logs:/var/log/nginx
+    depends_on:
+      - tulink-backend
+    networks:
+      - tulink-network
+    restart: unless-stopped
+
+networks:
+  tulink-network:
+    driver: bridge
+
+volumes:
+  redis_data_staging:
+    driver: local

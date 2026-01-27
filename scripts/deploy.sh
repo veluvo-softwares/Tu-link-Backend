@@ -45,18 +45,21 @@ case $ENVIRONMENT in
         DOCKER_TAG="dev"
         COMPOSE_FILE="docker-compose.dev.yml"
         ENV_FILE=".env.development"
+        BRANCH="dev"
         ;;
     "staging")
         DOMAIN="api.staging.tulink.xyz"
         DOCKER_TAG="staging"
         COMPOSE_FILE="docker-compose.staging.yml"
         ENV_FILE=".env.staging"
+        BRANCH="stage"
         ;;
     "prod")
         DOMAIN="api.tulink.xyz"
         DOCKER_TAG="prod"
         COMPOSE_FILE="docker-compose.prod.yml"
         ENV_FILE=".env.production"
+        BRANCH="prod"
         ;;
 esac
 
@@ -95,10 +98,10 @@ if [[ -n $(git status --porcelain) ]]; then
     fi
 fi
 
-log "Pulling latest changes from $ENVIRONMENT branch..."
+log "Pulling latest changes from $BRANCH branch..."
 git fetch origin
-git checkout $ENVIRONMENT
-git pull origin $ENVIRONMENT
+git checkout $BRANCH
+git pull origin $BRANCH
 
 # Build and deploy
 log "Building Docker image..."
