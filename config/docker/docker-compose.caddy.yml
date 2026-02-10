@@ -1,11 +1,11 @@
 version: '3.8'
 
 services:
-  # Tu-Link Backend Application
+  # Tu-Link Backend Application - Production
   tulink-backend:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: config/docker/Dockerfile
       target: production
     container_name: tulink-backend-prod
     environment:
@@ -15,13 +15,14 @@ services:
       - REDIS_PORT=6379
     env_file:
       - .env.production
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"  # Only expose to internal network, not host
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - tulink-network
+      - traefik-network  # Connect to external Caddy network
     restart: unless-stopped
     volumes:
       - ./logs:/usr/src/app/logs
@@ -33,13 +34,19 @@ services:
       restart_policy:
         condition: any
         max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
-  # Redis Cache Database
+  # Redis Cache Database - Production
   redis:
     image: redis:7-alpine
     container_name: tulink-redis-prod
-    ports:
-      - "127.0.0.1:6379:6379"  # Only bind to localhost for security
+    expose:
+      - "6379"  # Only expose to internal network
     volumes:
       - redis_data:/data
     command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
@@ -57,26 +64,12 @@ services:
           memory: 256M
           cpus: '0.25'
 
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    container_name: tulink-nginx-prod
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
-      - ./nginx/ssl:/etc/nginx/ssl:ro
-      - ./nginx/logs:/var/log/nginx
-    depends_on:
-      - tulink-backend
-    networks:
-      - tulink-network
-    restart: unless-stopped
-
 networks:
   tulink-network:
     driver: bridge
+    internal: true  # Internal network for backend-redis communication
+  traefik-network:
+    external: true  # Connect to external Caddy network
 
 volumes:
   redis_data:

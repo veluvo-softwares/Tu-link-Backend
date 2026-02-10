@@ -1,0 +1,79 @@
+version: '3.8'
+
+services:
+  # Tu-Link Backend Application - Development
+  tulink-backend:
+    build:
+      context: ../../
+      dockerfile: config/docker/Dockerfile
+      target: development  # Use development stage for hot reloading
+    container_name: tulink-backend-dev
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env.development
+    expose:
+      - "3000"
+    ports:
+      - "3001:3000"  # Also expose for direct access during development
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tulink-network
+      - traefik-network
+    restart: unless-stopped
+    volumes:
+      - ./src:/usr/src/app/src:ro  # Mount source for development
+      - ./logs:/usr/src/app/logs
+    command: npm run start:dev  # Use development start command
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis Cache Database - Development
+  redis:
+    image: redis:7-alpine
+    container_name: tulink-redis-dev
+    expose:
+      - "6379"
+    ports:
+      - "6380:6379"  # Expose Redis for development debugging
+    volumes:
+      - redis_dev_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - tulink-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: '0.1'
+
+networks:
+  tulink-network:
+    driver: bridge
+    internal: true
+  traefik-network:
+    external: true
+
+volumes:
+  redis_dev_data:
+    driver: local

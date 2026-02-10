@@ -43,21 +43,21 @@ case $ENVIRONMENT in
     "dev")
         DOMAIN="api.dev.tulink.xyz"
         DOCKER_TAG="dev"
-        COMPOSE_FILE="docker-compose.dev.yml"
+        COMPOSE_FILE="config/docker/docker-compose.dev.yml"
         ENV_FILE=".env.development"
         BRANCH="dev"
         ;;
     "staging")
         DOMAIN="api.staging.tulink.xyz"
         DOCKER_TAG="staging"
-        COMPOSE_FILE="docker-compose.staging.yml"
+        COMPOSE_FILE="config/docker/docker-compose.staging.yml"
         ENV_FILE=".env.staging"
-        BRANCH="stage"
+        BRANCH="main"  # Deploy from main branch
         ;;
     "prod")
         DOMAIN="api.tulink.xyz"
         DOCKER_TAG="prod"
-        COMPOSE_FILE="docker-compose.prod.yml"
+        COMPOSE_FILE="config/docker/docker-compose.caddy.yml"
         ENV_FILE=".env.production"
         BRANCH="prod"
         ;;

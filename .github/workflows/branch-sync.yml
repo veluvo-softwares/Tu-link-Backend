@@ -1,0 +1,263 @@
+name: Branch Sync & Management
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      sync_direction:
+        description: 'Sync direction'
+        required: true
+        default: 'main-to-branches'
+        type: choice
+        options:
+        - main-to-branches
+        - branches-to-main
+      target_branches:
+        description: 'Target branches (comma-separated)'
+        required: true
+        default: 'dev,staging'
+
+env:
+  DEFAULT_BRANCHES: 'dev,staging'
+
+jobs:
+  # Sync main branch to dev and staging
+  sync-main-to-branches:
+    name: Sync Main to Dev/Staging
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.sync_direction == 'main-to-branches')
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get target branches
+        id: branches
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "branches=${{ github.event.inputs.target_branches }}" >> $GITHUB_OUTPUT
+          else
+            echo "branches=${{ env.DEFAULT_BRANCHES }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Sync to target branches
+        run: |
+          IFS=',' read -ra BRANCHES <<< "${{ steps.branches.outputs.branches }}"
+          
+          for branch in "${BRANCHES[@]}"; do
+            branch=$(echo $branch | xargs) # Trim whitespace
+            echo "🔄 Syncing main to $branch"
+            
+            # Check if branch exists
+            if git ls-remote --heads origin $branch | grep -q "refs/heads/$branch"; then
+              # Branch exists, try to merge
+              git checkout -B $branch origin/$branch
+              
+              # Check if we can fast-forward merge
+              if git merge-base --is-ancestor HEAD origin/main; then
+                echo "✅ Fast-forward merge possible"
+                git merge origin/main --ff-only
+                git push origin $branch
+                echo "✅ Successfully synced main to $branch"
+              else
+                echo "⚠️ Cannot fast-forward merge to $branch. Manual intervention required."
+                echo "Creating PR instead..."
+                
+                # Create a PR for the sync
+                gh pr create \
+                  --title "🔄 Sync main to $branch" \
+                  --body "Automated sync of main branch to $branch branch.
+
+                  **Changes:**
+                  - Latest commits from main
+                  - May require manual review if conflicts exist
+
+                  **Action required:**
+                  - Review changes
+                  - Resolve any conflicts
+                  - Merge when ready" \
+                  --base $branch \
+                  --head main \
+                  --label "sync" \
+                  || echo "PR may already exist"
+              fi
+            else
+              echo "🆕 Creating new branch $branch from main"
+              git checkout -b $branch
+              git push origin $branch
+              echo "✅ Created new branch $branch"
+            fi
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create sync summary
+        run: |
+          echo "## 🔄 Branch Sync Summary" >> $GITHUB_STEP_SUMMARY
+          echo "**Source:** main branch" >> $GITHUB_STEP_SUMMARY
+          echo "**Target branches:** ${{ steps.branches.outputs.branches }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp:** $(date)" >> $GITHUB_STEP_SUMMARY
+
+  # Manual sync workflow for prod branch (requires approval)
+  sync-to-production:
+    name: Sync to Production
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && contains(github.event.inputs.target_branches, 'prod')
+    environment:
+      name: production
+      url: https://api.tulink.xyz
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync main to prod
+        run: |
+          echo "🚀 Syncing main to prod (production deployment)"
+          
+          # Checkout/create prod branch
+          if git ls-remote --heads origin prod | grep -q "refs/heads/prod"; then
+            git checkout -B prod origin/prod
+          else
+            git checkout -b prod
+          fi
+          
+          # Merge main into prod
+          git merge origin/main --no-ff -m "🚀 Production release: sync main to prod
+
+          Automated production deployment sync.
+          
+          Commit: ${{ github.sha }}
+          Triggered by: ${{ github.actor }}
+          "
+          
+          # Push to prod
+          git push origin prod
+          
+          echo "✅ Successfully synced main to prod"
+
+      - name: Tag production release
+        run: |
+          # Create a release tag
+          TAG="v$(date +%Y.%m.%d.%H%M)"
+          git tag -a "$TAG" -m "Production release $TAG
+
+          Automated release from main branch.
+          Commit: ${{ github.sha }}
+          "
+          git push origin "$TAG"
+          echo "📌 Created release tag: $TAG"
+
+  # Validate branch state before sync
+  validate-branches:
+    name: Validate Branch States
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check branch status
+        run: |
+          echo "## 🔍 Branch Status Report" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | Status | Last Commit | Behind Main |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|-------------|-------------|" >> $GITHUB_STEP_SUMMARY
+          
+          branches="main dev staging prod"
+          for branch in $branches; do
+            if git ls-remote --heads origin $branch | grep -q "refs/heads/$branch"; then
+              git checkout $branch 2>/dev/null || git checkout -b $branch origin/$branch
+              
+              last_commit=$(git log -1 --format="%h %s" | cut -c1-50)
+              
+              if [ "$branch" = "main" ]; then
+                behind="N/A"
+              else
+                behind=$(git rev-list --count origin/main ^origin/$branch 2>/dev/null || echo "Unknown")
+              fi
+              
+              echo "| $branch | ✅ Exists | $last_commit | $behind |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $branch | ❌ Missing | - | - |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+
+  # Cleanup workflow
+  cleanup-merged-branches:
+    name: Cleanup Merged Branches
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Find merged feature branches
+        run: |
+          echo "🧹 Finding merged feature branches..."
+          
+          # Find branches that are merged into main
+          merged_branches=$(git branch -r --merged origin/main | grep -v -E "(main|dev|staging|prod|HEAD)" | grep -E "origin/feature/|origin/bugfix/|origin/hotfix/" | sed 's/origin\///' | xargs)
+          
+          if [ -n "$merged_branches" ]; then
+            echo "Found merged branches: $merged_branches"
+            echo "## 🧹 Merged Branches Found" >> $GITHUB_STEP_SUMMARY
+            echo "The following feature branches are merged and can be cleaned up:" >> $GITHUB_STEP_SUMMARY
+            echo "```" >> $GITHUB_STEP_SUMMARY
+            echo "$merged_branches" >> $GITHUB_STEP_SUMMARY  
+            echo "```" >> $GITHUB_STEP_SUMMARY
+            echo "⚠️ Manual cleanup required - these branches were not automatically deleted." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No merged feature branches found."
+            echo "✅ No merged feature branches to cleanup." >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Branch protection validation
+  validate-protection:
+    name: Validate Branch Protection
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Check branch protection status
+        run: |
+          echo "## 🛡️ Branch Protection Status" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | Protection Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------------------|" >> $GITHUB_STEP_SUMMARY
+          
+          protected_branches="main dev staging prod"
+          for branch in $protected_branches; do
+            if gh api repos/${{ github.repository }}/branches/$branch/protection >/dev/null 2>&1; then
+              echo "| $branch | ✅ Protected |" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "| $branch | ❌ Not Protected |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Recommended Protection Rules:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Require PR reviews" >> $GITHUB_STEP_SUMMARY
+          echo "- Require status checks" >> $GITHUB_STEP_SUMMARY
+          echo "- Restrict pushes to admins only" >> $GITHUB_STEP_SUMMARY
+          echo "- Require branches to be up to date" >> $GITHUB_STEP_SUMMARY
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
