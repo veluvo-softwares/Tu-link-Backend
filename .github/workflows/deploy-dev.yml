@@ -25,24 +25,26 @@ jobs:
     - name: Build application
       run: npm run build
 
-    - name: Build Docker image
-      run: |
-        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev .
-        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev
-
     - name: Deploy to Digital Ocean
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: ${{ secrets.DEV_HOST }}
-        username: ${{ secrets.DEV_USERNAME }}
-        key: ${{ secrets.DEV_SSH_KEY }}
-        port: ${{ secrets.DEV_SSH_PORT }}
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_KEY }}
+        port: ${{ secrets.DO_SSH_PORT || '22' }}
         script: |
-          cd /opt/tulink/dev
+          cd /opt/tulink-backend
+          git checkout dev
           git pull origin dev
-          docker-compose -f docker-compose.dev.yml pull
-          docker-compose -f docker-compose.dev.yml up -d --remove-orphans
+          
+          # Copy environment file
+          cp config/env/.env.development.example .env.development
+          
+          # Build and deploy using new structure
+          docker-compose -f config/docker/docker-compose.dev.yml pull
+          docker-compose -f config/docker/docker-compose.dev.yml up -d --remove-orphans
+          
+          # Cleanup
           docker image prune -f
 
     - name: Health check

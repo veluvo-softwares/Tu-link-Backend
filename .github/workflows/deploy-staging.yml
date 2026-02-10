@@ -28,24 +28,26 @@ jobs:
     - name: Build application
       run: npm run build
 
-    - name: Build Docker image
-      run: |
-        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:staging .
-        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:staging
-
     - name: Deploy to Digital Ocean
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: ${{ secrets.STAGING_HOST }}
-        username: ${{ secrets.STAGING_USERNAME }}
-        key: ${{ secrets.STAGING_SSH_KEY }}
-        port: ${{ secrets.STAGING_SSH_PORT }}
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_KEY }}
+        port: ${{ secrets.DO_SSH_PORT || '22' }}
         script: |
-          cd /opt/tulink/staging
+          cd /opt/tulink-backend
+          git checkout staging
           git pull origin staging
-          docker-compose -f docker-compose.staging.yml pull
-          docker-compose -f docker-compose.staging.yml up -d --remove-orphans
+          
+          # Copy environment file
+          cp config/env/.env.staging.example .env.staging
+          
+          # Build and deploy using new structure
+          docker-compose -f config/docker/docker-compose.staging.yml pull
+          docker-compose -f config/docker/docker-compose.staging.yml up -d --remove-orphans
+          
+          # Cleanup
           docker image prune -f
 
     - name: Health check
