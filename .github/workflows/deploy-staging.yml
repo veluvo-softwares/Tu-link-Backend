@@ -1,8 +1,13 @@
-name: Deploy to Staging
+name: Deploy to Staging (DISABLED - Dev Only Setup)
 
 on:
-  push:
-    branches: [ staging ]
+  # Disabled - focusing on dev environment only
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deploy to staging'
+        required: true
+        default: 'false'
 
 jobs:
   deploy:

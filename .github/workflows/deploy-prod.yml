@@ -1,14 +1,17 @@
-name: Deploy to Production
+name: Deploy to Production (DISABLED - Dev Only Setup)
 
 on:
-  push:
-    branches: [ prod ]
+  # Disabled - focusing on dev environment only  
   workflow_dispatch:
     inputs:
       deploy_reason:
         description: 'Reason for manual deployment'
         required: true
         default: 'Manual deployment'
+      force_deploy:
+        description: 'Force deploy to production'
+        required: true
+        default: 'false'
 
 jobs:
   deploy:
