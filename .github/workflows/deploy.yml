@@ -52,7 +52,7 @@ jobs:
         with:
           host: ${{ secrets.DEV_HOST }}
           username: ${{ secrets.DEV_USERNAME }}
-          private_key: ${{ secrets.DEV_SSH_KEY }}
+          key: ${{ secrets.DEV_SSH_KEY }}
           port: ${{ secrets.DEV_PORT || 22 }}
           script: |
             cd /opt/tulink
