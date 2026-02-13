@@ -3,7 +3,6 @@ name: Deploy Tu-Link Backend
 on:
   push:
     branches:
-      - dev
       - stage
       - prod
       - main  # Include main for production deployments
@@ -39,27 +38,6 @@ jobs:
         run: npm run test
         env:
           NODE_ENV: test
-
-  # Deploy to development
-  deploy-dev:
-    if: github.ref == 'refs/heads/dev'
-    needs: test
-    runs-on: ubuntu-latest
-    environment: development
-    steps:
-      - name: Deploy to Development
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.DEV_HOST }}
-          username: ${{ secrets.DEV_USERNAME }}
-          key: ${{ secrets.DEV_SSH_KEY }}
-          port: ${{ secrets.DEV_PORT || 22 }}
-          script: |
-            cd /opt/tulink
-            git fetch origin
-            git checkout dev
-            git pull origin dev
-            ./scripts/deploy.sh dev
 
   # Deploy to staging
   deploy-staging:
@@ -105,7 +83,7 @@ jobs:
 
   # Notify deployment status
   notify:
-    needs: [deploy-dev, deploy-staging, deploy-prod]
+    needs: [deploy-staging, deploy-prod]
     if: always()
     runs-on: ubuntu-latest
     steps:
