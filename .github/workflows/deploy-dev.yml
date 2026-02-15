@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: development
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -25,49 +25,77 @@ jobs:
     - name: Build application
       run: npm run build
 
-    - name: Deploy to Digital Ocean Dev Environment
-      uses: appleboy/ssh-action@v1.2.0
-      with:
-        host: ${{ secrets.DEV_HOST }}
-        username: ${{ secrets.DEV_USERNAME }}
-        key: ${{ secrets.DEV_SSH_KEY }}
-        port: 22
-        timeout: 120s
-        command_timeout: 30m
-        debug: true
-        script: |
-          # Navigate to project directory
-          cd /opt/tulink-backend
-          
-          # Update code
-          git checkout dev
-          git pull origin dev
-          
-          # Copy environment file and configure
-          cp config/env/.env.development.example .env
-          
-          # Build and deploy
-          docker-compose -f config/docker/docker-compose.dev.yml down || true
-          docker-compose -f config/docker/docker-compose.dev.yml build --no-cache
-          docker-compose -f config/docker/docker-compose.dev.yml up -d
-          
-          # Wait for service to start
-          sleep 15
-          
-          # Cleanup old images
-          docker image prune -f
+    - name: Trigger webhook deployment
+      run: |
+        echo "Triggering deployment via webhook..."
+        
+        # First, test webhook connectivity
+        echo "Testing webhook endpoint connectivity..."
+        if ! curl -f -s -m 5 http://${{ secrets.DEV_HOST }}:9000/hooks/deploy-dev -X GET; then
+          echo "Warning: Webhook endpoint may not be reachable"
+        fi
+        
+        # Trigger deployment with longer timeout and better error handling
+        echo "Sending deployment request..."
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          -H "Content-Type: application/json" \
+          -H "X-Deploy-Token: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+          -d '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}' \
+          --max-time 600 \
+          --connect-timeout 10 \
+          --retry 2 \
+          --retry-delay 5 \
+          http://${{ secrets.DEV_HOST }}:9000/hooks/deploy-dev 2>&1)
+
+        # Handle curl exit codes
+        CURL_EXIT_CODE=$?
+        if [ $CURL_EXIT_CODE -ne 0 ]; then
+          echo "Curl failed with exit code: $CURL_EXIT_CODE"
+          case $CURL_EXIT_CODE in
+            28) echo "Error: Timeout - webhook request took longer than 10 minutes" ;;
+            6|7) echo "Error: Could not resolve host or connect to webhook endpoint" ;;
+            *) echo "Error: Unexpected curl error" ;;
+          esac
+          echo "Response received (if any): $RESPONSE"
+          exit 1
+        fi
+
+        # Parse response
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        echo "Response code: $HTTP_CODE"
+        echo "Response body:"
+        echo "$BODY"
+
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          echo "Deployment triggered successfully!"
+        else
+          echo "Deployment webhook failed with HTTP $HTTP_CODE"
+          exit 1
+        fi
 
     - name: Health check
       run: |
-        echo "Waiting for service to start..."
-        sleep 30
-        
-        # Test the root endpoint (which exists in app.controller.ts)
+        echo "Waiting for deployment to complete..."
+        sleep 60
+
         echo "Testing application endpoint..."
-        if curl -f http://105.163.157.131:3000/ -m 10; then
-          echo "✅ Application is responding!"
-        else
-          echo "⚠️ Application not responding yet, checking container status..."
-          # This will help debug if containers are running
-          exit 0
-        fi
+        MAX_RETRIES=5
+        RETRY_COUNT=0
+
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          if curl -f -s https://api.dev.tulink.xyz/health -m 10; then
+            echo ""
+            echo "Application is responding!"
+            exit 0
+          else
+            echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES failed, retrying in 15s..."
+            sleep 15
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+          fi
+        done
+
+        echo "Health check failed after $MAX_RETRIES attempts"
+        echo "Deployment may still be in progress - check server logs"
+        exit 1
