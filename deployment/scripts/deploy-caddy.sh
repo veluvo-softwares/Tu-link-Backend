@@ -92,12 +92,14 @@ fi
 # Git operations (if in git repo)
 if git rev-parse --git-dir > /dev/null 2>&1; then
     log "Pulling latest changes..."
-    git pull origin main || warn "Failed to pull latest changes"
+    # Determine current branch
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    git pull origin $CURRENT_BRANCH || warn "Failed to pull latest changes"
 fi
 
 # Stop existing containers
 log "Stopping existing containers..."
-docker-compose -f $COMPOSE_FILE down --remove-orphans || true
+docker compose -f $COMPOSE_FILE down --remove-orphans || true
 
 # Remove old container if exists
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
@@ -107,7 +109,7 @@ fi
 
 # Build and start new containers
 log "Building and starting containers..."
-docker-compose -f $COMPOSE_FILE up -d --build
+docker compose -f $COMPOSE_FILE up -d --build
 
 # Wait for services to be ready
 log "Waiting for services to start..."
@@ -157,7 +159,7 @@ fi
 if [ -d "$CADDY_DIR" ]; then
     log "Reloading Caddy configuration..."
     cd $CADDY_DIR
-    docker-compose exec caddy caddy reload --config /etc/caddy/Caddyfile || warn "Failed to reload Caddy config"
+    docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile || warn "Failed to reload Caddy config"
     cd - > /dev/null
 fi
 
@@ -167,11 +169,11 @@ docker image prune -f
 
 # Display container status
 log "Container status:"
-docker-compose -f $COMPOSE_FILE ps
+docker compose -f $COMPOSE_FILE ps
 
 # Show logs
 log "Recent logs:"
-docker-compose -f $COMPOSE_FILE logs --tail=20 tulink-backend
+docker compose -f $COMPOSE_FILE logs --tail=20 tulink-backend
 
 success "Deployment to $ENVIRONMENT completed successfully!"
 
