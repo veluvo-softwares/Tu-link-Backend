@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # Tu-Link Backend Application - Staging
+  tulink-backend:
+    build:
+      context: ../../
+      dockerfile: config/docker/Dockerfile
+      target: production
+    container_name: tulink-backend-staging
+    environment:
+      - NODE_ENV=staging
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env.staging
+    expose:
+      - "3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tulink-network
+      - traefik-network
+    restart: unless-stopped
+    volumes:
+      - ./logs:/usr/src/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+          cpus: '0.5'
+      restart_policy:
+        condition: any
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "environment=staging"
+      - "service=tulink-backend"
+
+  # Redis Cache Database - Staging
+  redis:
+    image: redis:7-alpine
+    container_name: tulink-redis-staging
+    expose:
+      - "6379"
+    volumes:
+      - redis_staging_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - tulink-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 192M
+          cpus: '0.2'
+    labels:
+      - "environment=staging"
+      - "service=redis"
+
+networks:
+  tulink-network:
+    driver: bridge
+    internal: true
+  traefik-network:
+    external: true
+
+volumes:
+  redis_staging_data:
+    driver: local

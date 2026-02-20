@@ -8,7 +8,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: development
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -25,27 +25,77 @@ jobs:
     - name: Build application
       run: npm run build
 
-    - name: Build Docker image
+    - name: Trigger webhook deployment
       run: |
-        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev .
-        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:dev
+        echo "Triggering deployment via webhook..."
+        
+        # First, test webhook connectivity
+        echo "Testing webhook endpoint connectivity..."
+        if ! curl -f -s -m 5 http://${{ secrets.DEV_HOST }}:9000/hooks/deploy-dev -X GET; then
+          echo "Warning: Webhook endpoint may not be reachable"
+        fi
+        
+        # Trigger deployment with longer timeout and better error handling
+        echo "Sending deployment request..."
+        RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+          -H "Content-Type: application/json" \
+          -H "X-Deploy-Token: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}" \
+          -d '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}' \
+          --max-time 600 \
+          --connect-timeout 10 \
+          --retry 2 \
+          --retry-delay 5 \
+          http://${{ secrets.DEV_HOST }}:9000/hooks/deploy-dev 2>&1)
 
-    - name: Deploy to Digital Ocean
-      uses: appleboy/ssh-action@v1.0.0
-      with:
-        host: ${{ secrets.DEV_HOST }}
-        username: ${{ secrets.DEV_USERNAME }}
-        key: ${{ secrets.DEV_SSH_KEY }}
-        port: ${{ secrets.DEV_SSH_PORT }}
-        script: |
-          cd /opt/tulink/dev
-          git pull origin dev
-          docker-compose -f docker-compose.dev.yml pull
-          docker-compose -f docker-compose.dev.yml up -d --remove-orphans
-          docker image prune -f
+        # Handle curl exit codes
+        CURL_EXIT_CODE=$?
+        if [ $CURL_EXIT_CODE -ne 0 ]; then
+          echo "Curl failed with exit code: $CURL_EXIT_CODE"
+          case $CURL_EXIT_CODE in
+            28) echo "Error: Timeout - webhook request took longer than 10 minutes" ;;
+            6|7) echo "Error: Could not resolve host or connect to webhook endpoint" ;;
+            *) echo "Error: Unexpected curl error" ;;
+          esac
+          echo "Response received (if any): $RESPONSE"
+          exit 1
+        fi
+
+        # Parse response
+        HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+        BODY=$(echo "$RESPONSE" | sed '$d')
+
+        echo "Response code: $HTTP_CODE"
+        echo "Response body:"
+        echo "$BODY"
+
+        if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+          echo "Deployment triggered successfully!"
+        else
+          echo "Deployment webhook failed with HTTP $HTTP_CODE"
+          exit 1
+        fi
 
     - name: Health check
       run: |
-        sleep 30
-        curl -f https://api.dev.tulink.xyz/health || exit 1
+        echo "Waiting for deployment to complete..."
+        sleep 60
+
+        echo "Testing application endpoint..."
+        MAX_RETRIES=5
+        RETRY_COUNT=0
+
+        while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+          if curl -f -s https://api.dev.tulink.xyz/health -m 10; then
+            echo ""
+            echo "Application is responding!"
+            exit 0
+          else
+            echo "Health check attempt $((RETRY_COUNT + 1))/$MAX_RETRIES failed, retrying in 15s..."
+            sleep 15
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+          fi
+        done
+
+        echo "Health check failed after $MAX_RETRIES attempts"
+        echo "Deployment may still be in progress - check server logs"
+        exit 1

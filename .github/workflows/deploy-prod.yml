@@ -1,14 +1,17 @@
-name: Deploy to Production
+name: Deploy to Production (DISABLED - Dev Only Setup)
 
 on:
-  push:
-    branches: [ prod ]
+  # Disabled - focusing on dev environment only  
   workflow_dispatch:
     inputs:
       deploy_reason:
         description: 'Reason for manual deployment'
         required: true
         default: 'Manual deployment'
+      force_deploy:
+        description: 'Force deploy to production'
+        required: true
+        default: 'false'
 
 jobs:
   deploy:
@@ -41,24 +44,26 @@ jobs:
     - name: Security scan
       run: npm audit --audit-level=high
 
-    - name: Build Docker image
-      run: |
-        echo ${{ secrets.DOCKER_HUB_TOKEN }} | docker login -u ${{ secrets.DOCKER_HUB_USERNAME }} --password-stdin
-        docker build -t ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:prod .
-        docker push ${{ secrets.DOCKER_HUB_USERNAME }}/tulink-backend:prod
-
     - name: Deploy to Digital Ocean
       uses: appleboy/ssh-action@v1.0.0
       with:
-        host: ${{ secrets.PROD_HOST }}
-        username: ${{ secrets.PROD_USERNAME }}
-        key: ${{ secrets.PROD_SSH_KEY }}
-        port: ${{ secrets.PROD_SSH_PORT }}
+        host: ${{ secrets.DO_HOST }}
+        username: ${{ secrets.DO_USERNAME }}
+        key: ${{ secrets.DO_SSH_KEY }}
+        port: ${{ secrets.DO_SSH_PORT || '22' }}
         script: |
-          cd /opt/tulink/prod
+          cd /opt/tulink-backend
+          git checkout prod
           git pull origin prod
-          docker-compose -f docker-compose.prod.yml pull
-          docker-compose -f docker-compose.prod.yml up -d --remove-orphans
+          
+          # Copy environment file (ensure production secrets are configured)
+          cp config/env/.env.production.example .env.production
+          
+          # Build and deploy using new structure
+          docker-compose -f config/docker/docker-compose.caddy.yml pull
+          docker-compose -f config/docker/docker-compose.caddy.yml up -d --remove-orphans
+          
+          # Cleanup
           docker image prune -f
           docker system prune -f
 

@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Tu-Link Backend Application - Production
+  tulink-backend:
+    build:
+      context: ../../
+      dockerfile: config/docker/Dockerfile
+      target: production
+    container_name: tulink-backend-prod
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - .env.production
+    expose:
+      - "3000"  # Only expose to internal network, not host
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - tulink-network
+      - traefik-network  # Connect to external Caddy network
+    restart: unless-stopped
+    volumes:
+      - ./logs:/usr/src/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+      restart_policy:
+        condition: any
+        max_attempts: 3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis Cache Database - Production
+  redis:
+    image: redis:7-alpine
+    container_name: tulink-redis-prod
+    expose:
+      - "6379"  # Only expose to internal network
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    networks:
+      - tulink-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+networks:
+  tulink-network:
+    driver: bridge
+    internal: true  # Internal network for backend-redis communication
+  traefik-network:
+    external: true  # Connect to external Caddy network
+
+volumes:
+  redis_data:
+    driver: local

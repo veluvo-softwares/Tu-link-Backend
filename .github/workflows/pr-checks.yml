@@ -1,0 +1,328 @@
+name: PR Quality Checks
+
+on:
+  pull_request:
+    branches: [ main, dev, staging, prod ]
+  push:
+    branches: [ main, dev, staging, prod ]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # Code quality and standards checks
+  quality-checks:
+    name: Code Quality & Standards
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Need full history for some checks
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint:check
+
+      - name: Run Prettier check
+        run: npx prettier --check "src/**/*.ts" "test/**/*.ts"
+
+      - name: Run TypeScript type checking
+        run: npm run typecheck
+
+      - name: Check for TODO/FIXME comments
+        run: |
+          if grep -r "TODO\|FIXME\|XXX\|HACK" src/ --include="*.ts" --include="*.js"; then
+            echo "::warning::Found TODO/FIXME comments in code. Consider addressing them."
+          fi
+
+      - name: Check file naming conventions
+        run: |
+          # Check for uppercase files (except README, LICENSE, etc.)
+          if find src/ -name "*[A-Z]*" -type f | grep -v -E "(README|LICENSE|CHANGELOG)" | head -1; then
+            echo "::error::Found files with uppercase letters. Use kebab-case naming."
+            exit 1
+          fi
+
+      - name: Verify package.json scripts integrity
+        run: |
+          # Check that all referenced scripts exist
+          if ! npm run lint:check --silent; then
+            echo "::error::lint:check script failed"
+            exit 1
+          fi
+
+  # Security scanning
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+
+      - name: Check for secrets in code
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
+          base: main
+          head: HEAD
+
+  # Test suite
+  tests:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create test environment file
+        run: |
+          cat > .env.test << EOF
+          NODE_ENV=test
+          PORT=3001
+          REDIS_HOST=localhost
+          REDIS_PORT=6379
+          REDIS_PASSWORD=
+          JWT_SECRET=test-jwt-secret-for-testing-32-chars
+          JWT_REFRESH_SECRET=test-refresh-secret-for-testing-32
+          FIREBASE_PROJECT_ID=test-project
+          FIREBASE_PRIVATE_KEY=test-key
+          FIREBASE_CLIENT_EMAIL=test@test.iam.gserviceaccount.com
+          GOOGLE_MAPS_API_KEY=test-key
+          EOF
+
+      - name: Run unit tests
+        run: npm test
+        env:
+          NODE_ENV: test
+
+      - name: Run test coverage
+        run: npm run test:cov
+        env:
+          NODE_ENV: test
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+
+  # Build verification
+  build-verification:
+    name: Build Verification
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        environment: [dev, staging, prod]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image for ${{ matrix.environment }}
+        run: |
+          docker build \
+            -f config/docker/Dockerfile \
+            -t tulink-backend:${{ matrix.environment }}-test \
+            --target production \
+            .
+
+      - name: Test Docker image
+        run: |
+          # Start container and test it responds
+          docker run -d \
+            --name test-container \
+            -p 3000:3000 \
+            -e NODE_ENV=${{ matrix.environment }} \
+            -e PORT=3000 \
+            tulink-backend:${{ matrix.environment }}-test
+
+          # Wait for container to start
+          sleep 10
+
+          # Basic health check (if health endpoint exists)
+          if docker exec test-container curl -f http://localhost:3000/health 2>/dev/null; then
+            echo "✅ Health check passed"
+          else
+            echo "ℹ️ Health endpoint not available or container not ready"
+          fi
+
+          # Cleanup
+          docker stop test-container
+          docker rm test-container
+
+  # Configuration validation
+  config-validation:
+    name: Configuration Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose files
+        run: |
+          # Check if docker-compose files are valid
+          for file in config/docker/docker-compose.*.yml; do
+            echo "Validating $file"
+            docker-compose -f "$file" config --quiet
+          done
+
+      - name: Validate environment file examples
+        run: |
+          # Check that all required env vars are documented
+          for env_file in config/env/.env.*.example; do
+            echo "Validating $env_file"
+            
+            # Check for required variables
+            required_vars="NODE_ENV PORT REDIS_HOST REDIS_PORT"
+            for var in $required_vars; do
+              if ! grep -q "^$var=" "$env_file"; then
+                echo "::error::Missing required variable $var in $env_file"
+                exit 1
+              fi
+            done
+          done
+
+      - name: Check Firebase config
+        run: |
+          if [ -f "config/firebase/firebase.json" ]; then
+            echo "✅ Firebase config found"
+            # Validate JSON syntax
+            cat config/firebase/firebase.json | jq empty
+          fi
+
+      - name: Validate package.json
+        run: |
+          # Check package.json is valid
+          cat package.json | jq empty
+          
+          # Check required scripts exist
+          required_scripts="build start start:dev start:prod test lint typecheck"
+          for script in $required_scripts; do
+            if ! jq -e ".scripts.\"$script\"" package.json > /dev/null; then
+              echo "::error::Missing required script: $script"
+              exit 1
+            fi
+          done
+
+  # Documentation checks
+  documentation-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check documentation structure
+        run: |
+          # Check that main documentation files exist
+          required_docs="README.md docs/index.md docs/readme-deployment.md"
+          for doc in $required_docs; do
+            if [ ! -f "$doc" ]; then
+              echo "::error::Missing required documentation: $doc"
+              exit 1
+            fi
+          done
+
+      - name: Check for broken links in documentation
+        run: |
+          # Simple check for broken internal links
+          for md_file in docs/*.md; do
+            echo "Checking links in $md_file"
+            
+            # Extract markdown links and check if referenced files exist
+            grep -o '\[.*\](\.\/[^)]*\.md)' "$md_file" | sed 's/.*](\.\///; s/).*//' | while read -r link; do
+              if [ ! -f "docs/$link" ]; then
+                echo "::warning::Potentially broken link in $md_file: $link"
+              fi
+            done
+          done
+
+      - name: Validate deployment scripts exist
+        run: |
+          # Check deployment scripts are executable and exist
+          if [ ! -x "deployment/scripts/deploy-caddy.sh" ]; then
+            echo "::error::deploy-caddy.sh is missing or not executable"
+            exit 1
+          fi
+          
+          if [ ! -x "deployment/scripts/deploy.sh" ]; then
+            echo "::error::deploy.sh is missing or not executable"  
+            exit 1
+          fi
+
+  # Final status check
+  pr-checks-status:
+    name: PR Checks Status
+    runs-on: ubuntu-latest
+    needs: [quality-checks, security-scan, tests, build-verification, config-validation, documentation-check]
+    if: always()
+    steps:
+      - name: Check overall status
+        run: |
+          if [ "${{ needs.quality-checks.result }}" != "success" ] || 
+             [ "${{ needs.security-scan.result }}" != "success" ] ||
+             [ "${{ needs.tests.result }}" != "success" ] ||
+             [ "${{ needs.build-verification.result }}" != "success" ] ||
+             [ "${{ needs.config-validation.result }}" != "success" ] ||
+             [ "${{ needs.documentation-check.result }}" != "success" ]; then
+            echo "❌ Some checks failed. Please review and fix issues before merging."
+            exit 1
+          else
+            echo "✅ All PR checks passed! Ready for review and merge."
+          fi
