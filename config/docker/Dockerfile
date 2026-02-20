@@ -1,10 +1,20 @@
 # Development stage
 FROM node:20-alpine AS development
 WORKDIR /usr/src/app
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY . .
-RUN npm run build
+
+# For development, we don't need to build - we'll use ts-node or nest start --watch
+# Only build if NODE_ENV is production
+RUN if [ "$NODE_ENV" = "production" ]; then npm run build; fi
+
+# Development CMD (will be overridden by docker-compose)
+CMD ["npm", "run", "start:dev"]
 
 # Production stage
 FROM node:20-alpine AS production
