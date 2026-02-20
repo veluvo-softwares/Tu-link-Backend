@@ -27,8 +27,8 @@ services:
       - traefik-network
     restart: unless-stopped
     volumes:
-      - ./src:/usr/src/app/src:ro  # Mount source for development
-      - ./logs:/usr/src/app/logs
+      - ../../src:/usr/src/app/src:ro  # Mount source for development
+      - ../../logs:/usr/src/app/logs
     command: npm run start:dev  # Use development start command
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
