@@ -9,9 +9,9 @@ COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY . .
 
-# For development, we don't need to build - we'll use ts-node or nest start --watch
-# Only build if NODE_ENV is production
-RUN if [ "$NODE_ENV" = "production" ]; then npm run build; fi
+# Build the application for both development and production
+# NestJS requires the build even for development mode with --watch
+RUN npm run build
 
 # Development CMD (will be overridden by docker-compose)
 CMD ["npm", "run", "start:dev"]
