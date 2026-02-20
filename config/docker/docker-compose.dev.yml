@@ -31,11 +31,11 @@ services:
       - ./logs:/usr/src/app/logs
     command: npm run start:dev  # Use development start command
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   # Redis Cache Database - Development
   redis:
@@ -47,9 +47,9 @@ services:
       - "6380:6379"  # Expose Redis for development debugging
     volumes:
       - redis_dev_data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes
     healthcheck:
-      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 3s
       retries: 3
