@@ -14,7 +14,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
-      - .env.development
+      - ../../.env.development
     expose:
       - "3000"
     ports:
@@ -30,11 +30,6 @@ services:
       - ./src:/usr/src/app/src:ro  # Mount source for development
       - ./logs:/usr/src/app/logs
     command: npm run start:dev  # Use development start command
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.25'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -61,11 +56,6 @@ services:
     networks:
       - tulink-network
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.1'
 
 networks:
   tulink-network:
