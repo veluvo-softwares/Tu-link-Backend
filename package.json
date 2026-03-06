@@ -7,13 +7,8 @@
   "license": "UNLICENSED",
   "scripts": {
     "docker:dev": "docker compose -f config/docker/docker-compose.dev.yml up -d --build",
-    "docker:staging": "docker compose -f config/docker/docker-compose.staging.yml up -d --build", 
-    "docker:prod": "docker compose -f config/docker/docker-compose.prod.yml up -d --build",
-    "docker:down": "docker compose down",
+    "docker:down": "docker compose -f config/docker/docker-compose.dev.yml down",
     "deploy": "./deploy.sh",
-    "deploy:dev": "./deploy.sh dev",
-    "deploy:staging": "./deploy.sh staging", 
-    "deploy:prod": "./deploy.sh prod",
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -28,9 +23,6 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "deploy:dev": "./deployment/scripts/deploy-caddy.sh dev",
-    "deploy:staging": "./deployment/scripts/deploy-caddy.sh staging", 
-    "deploy:prod": "./deployment/scripts/deploy-caddy.sh prod",
     "prepare": "husky"
   },
   "dependencies": {
