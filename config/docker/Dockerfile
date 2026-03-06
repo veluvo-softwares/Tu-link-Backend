@@ -1,10 +1,20 @@
 # Development stage
 FROM node:20-alpine AS development
 WORKDIR /usr/src/app
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
 COPY package*.json ./
 RUN npm ci --ignore-scripts
 COPY . .
+
+# Build the application for both development and production
+# NestJS requires the build even for development mode with --watch
 RUN npm run build
+
+# Development CMD (will be overridden by docker-compose)
+CMD ["npm", "run", "start:dev"]
 
 # Production stage
 FROM node:20-alpine AS production
