@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Tu-Link Backend Application - Development
   tulink-backend:
@@ -14,11 +12,11 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
-      - .env.development
+      - ../../.env
     expose:
       - "3000"
     ports:
-      - "3001:3000"  # Also expose for direct access during development
+      - "3000:3000"  # Expose on standard port for DigitalOcean deployment
     depends_on:
       redis:
         condition: service_healthy
@@ -27,20 +25,15 @@ services:
       - traefik-network
     restart: unless-stopped
     volumes:
-      - ./src:/usr/src/app/src:ro  # Mount source for development
-      - ./logs:/usr/src/app/logs
+      - ../../src:/usr/src/app/src:ro  # Mount source for development
+      - ../../logs:/usr/src/app/logs
     command: npm run start:dev  # Use development start command
-    deploy:
-      resources:
-        limits:
-          memory: 256M
-          cpus: '0.25'
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   # Redis Cache Database - Development
   redis:
@@ -52,20 +45,15 @@ services:
       - "6380:6379"  # Expose Redis for development debugging
     volumes:
       - redis_dev_data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes
     healthcheck:
-      test: ['CMD', 'redis-cli', '--auth', '${REDIS_PASSWORD}', 'ping']
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 3s
       retries: 3
     networks:
       - tulink-network
     restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: '0.1'
 
 networks:
   tulink-network:

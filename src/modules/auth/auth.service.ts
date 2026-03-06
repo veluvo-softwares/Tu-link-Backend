@@ -215,9 +215,27 @@ export class AuthService {
             'Too many failed login attempts. Please try again later',
           );
         }
+
+        if (firebaseError.message === 'INVALID_EMAIL') {
+          throw new UnauthorizedException('Invalid email address');
+        }
+
+        if (firebaseError.message === 'WEAK_PASSWORD') {
+          throw new UnauthorizedException('Password is too weak');
+        }
+
+        // Handle any other Firebase error messages
+        if (firebaseError.message) {
+          throw new UnauthorizedException(
+            'Login failed. Please check your credentials and try again',
+          );
+        }
       }
 
-      throw new UnauthorizedException('Authentication failed');
+      // More specific fallback message
+      throw new UnauthorizedException(
+        'Unable to sign in. Please verify your email and password are correct',
+      );
     }
   }
 
