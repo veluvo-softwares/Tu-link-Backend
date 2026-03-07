@@ -7,7 +7,7 @@ set -e
 
 # Configuration  
 APP_DIR="/root/tulink-backend"
-REPO_URL="https://github.com/yourusername/tulink-backend.git"  # Update with your repo URL
+REPO_URL="https://github.com/veluvo-softwares/Tu-link-Backend.git"
 BRANCH="dev"
 
 # Colors for output
@@ -32,9 +32,9 @@ if ! docker info > /dev/null 2>&1; then
     error "Docker is not running. Please start Docker first."
 fi
 
-# Check Traefik network
+# Check traefik network
 if ! docker network ls | grep -q "traefik-network"; then
-    error "Traefik network not found. Please ensure Traefik is running."
+    error "traefik-network not found. Please ensure existing infrastructure is running."
 fi
 
 # Setup app directory
@@ -88,6 +88,7 @@ docker compose -f config/docker/docker-compose.dev.yml ps
 
 echo ""
 log "🎉 Dev deployment complete!"
+log "🌐 Public API: https://api.dev.tulink.xyz"
 log "🌐 Local API: http://localhost:3000"
-log "📚 Docs: http://localhost:3000/api"  
+log "📚 Docs: https://api.dev.tulink.xyz/api"  
 log "🔍 Logs: docker compose -f config/docker/docker-compose.dev.yml logs -f"

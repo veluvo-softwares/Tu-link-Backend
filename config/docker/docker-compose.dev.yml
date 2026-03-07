@@ -1,11 +1,11 @@
 services:
-  # Tu-Link Backend Application - Development
-  tulink-backend:
+  # Tu-Link Backend Application - Development (replaces api-dev nginx)
+  api-dev:
     build:
       context: ../../
       dockerfile: config/docker/Dockerfile
       target: development
-    container_name: tulink-backend-dev
+    container_name: api-dev
     environment:
       - NODE_ENV=development
       - PORT=3000
@@ -15,8 +15,6 @@ services:
       - ../../.env
     expose:
       - "3000"
-    # ports:
-      # - "3000:3000"
     depends_on:
       redis:
         condition: service_healthy
@@ -28,14 +26,6 @@ services:
       - ../../src:/usr/src/app/src:ro
       - ../../logs:/usr/src/app/logs
     command: npm run start:dev
-    # Optional Traefik labels (uncomment if you want SSL access via domain)
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.tulink-dev.rule=Host(`api.dev.tulink.xyz`)"
-      - "traefik.http.routers.tulink-dev.entrypoints=websecure"
-      - "traefik.http.routers.tulink-dev.tls.certresolver=letsencrypt"
-      - "traefik.http.services.tulink-dev.loadbalancer.server.port=3000"
-      - "traefik.docker.network=traefik-network"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
