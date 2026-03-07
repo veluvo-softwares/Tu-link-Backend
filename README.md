@@ -1,6 +1,6 @@
 # Tu-Link Backend API
 
-A real-time convoy coordination platform backend built with NestJS, providing location tracking, journey management, and Firebase authentication.
+A real-time convoy coordination platform backend built with NestJS, providing location tracking, journey management, and Firebase authentication. Built by the team at veluvo softwares
 
 ## 🚀 Quick Start
 
