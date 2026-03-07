@@ -1,46 +1,66 @@
 # Tu-Link Backend API
 
-A comprehensive convoy coordination platform backend built with NestJS, providing real-time location tracking, journey management, and Firebase push notifications.
-
-<!-- Webhook deployment test - 2026-02-20 -->
+A real-time convoy coordination platform backend built with NestJS, providing location tracking, journey management, and Firebase authentication.
 
 ## 🚀 Quick Start
 
-### Multi-Environment Deployment Ready
-- **Development**: `https://api.dev.tulink.xyz`
-- **Staging**: `https://api.staging.tulink.xyz`  
-- **Production**: `https://api.tulink.xyz`
+### Prerequisites
+- Node.js 20+
+- Docker & Docker Compose
+- Firebase project
+- Google Maps API key
 
-### One-Command Deployment
+### Setup
+
+1. **Clone and Install**
+   ```bash
+   git clone <your-repo>
+   cd tulink-backend
+   npm install
+   ```
+
+2. **Configure Environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env with your Firebase and API credentials
+   ```
+
+3. **Start Development Environment**
+   ```bash
+   # Using Docker (Recommended)
+   npm run docker:dev
+   
+   # OR run manually
+   npm run start:dev
+   ```
+
+4. **Access Application**
+   - API Health: http://localhost:3000/health
+   - Swagger Docs: http://localhost:3000/api
+   - Redis: localhost:6380
+
+### Deploy Updates
 ```bash
-# Deploy to any environment
-./scripts/deploy.sh [dev|staging|prod]
+./deploy.sh
 ```
 
-## Features ✨
+## 📋 Core Features
 
-- **Real-Time Location Tracking**: WebSocket-based with <150ms latency
-- **Lag Detection**: Automatic alerts with WARNING/CRITICAL severity
-- **Arrival Detection**: Smart destination arrival detection
-- **Journey Management**: Complete lifecycle management (PENDING → ACTIVE → COMPLETED)
-- **Hybrid Architecture**: WebSocket primary + Firebase fallback
-- **Priority-Based Delivery**: Uber-inspired HIGH/MEDIUM/LOW message prioritization
-- **Sequence Numbering**: Guaranteed message ordering
-- **Acknowledgment System**: Retry logic with exponential backoff
-- **Redis Caching**: High-performance data caching
-- **Google Maps Integration**: Geocoding, routing, and distance calculations
-- **Firebase Security**: Complete Firestore security rules
-- **Swagger Documentation**: Auto-generated API docs
+- **Real-Time Location Tracking** - WebSocket-based with <150ms latency
+- **Journey Management** - Complete convoy lifecycle
+- **Firebase Authentication** - Secure user auth with refresh tokens
+- **Google Maps Integration** - Geocoding and routing
+- **Redis Caching** - High-performance data layer
+- **Swagger Documentation** - Auto-generated API docs
 
-## Tech Stack 🛠️
+## 🛠️ Tech Stack
 
 - **Framework**: NestJS (TypeScript)
 - **Database**: Firebase Firestore
-- **Real-Time**: Socket.io (WebSocket)
-- **Caching**: Redis
-- **Maps**: Google Maps Platform
+- **Real-Time**: Socket.io WebSockets
+- **Cache**: Redis
+- **Maps**: Google Maps Platform + Mapbox
 - **Auth**: Firebase Auth
-- **API Docs**: Swagger/OpenAPI
 
 ## Description
 
@@ -139,88 +159,45 @@ See: README_POSTMAN.md for complete testing guide
 ## API Endpoints 📡
 
 ### Authentication
-- `POST /auth/register` - Register new user (returns auth token)
-- `POST /auth/login` - Login with credentials (returns auth token)
+- `POST /auth/register` - Register new user
+- `POST /auth/login` - Login with credentials
 - `POST /auth/refresh` - Refresh authentication token
-- `POST /auth/logout` - Logout and revoke tokens
-- `GET /auth/profile` - Get user profile (protected)
-- `PUT /auth/profile` - Update profile (protected)
-
-**🔐 [Complete Authentication Guide](./docs/AUTHENTICATION_FLOW.md)** | **[Quick Start](./docs/AUTH_QUICK_START.md)**
+- `GET /auth/profile` - Get user profile
 
 ### Journeys
 - `POST /journeys` - Create journey
 - `GET /journeys/active` - Get active journeys
-- `GET /journeys/:id` - Get journey details
 - `POST /journeys/:id/start` - Start journey
-- `POST /journeys/:id/end` - End journey
 - `POST /journeys/:id/invite` - Invite participant
-- `POST /journeys/:id/accept` - Accept invitation
 
 ### Locations
-- `POST /locations` - Send location update (REST fallback)
-- `GET /locations/journeys/:id/history` - Get location history
+- `POST /locations` - Send location update
 - `GET /locations/journeys/:id/latest` - Get latest locations
 
-### Notifications
-- `GET /notifications` - Get user notifications
-- `GET /notifications/unread-count` - Get unread count
-- `PUT /notifications/:journeyId/:id/read` - Mark as read
-
-### Analytics
-- `GET /analytics/journeys/:id` - Get journey statistics
-- `GET /analytics/user` - Get user journey history
-
-**Full API Documentation**: http://localhost:3000/api
-
-## WebSocket Events 🔌
-
-### Client → Server
-- `join-journey` - Join a journey room
-- `location-update` - Send location update
-- `heartbeat` - Send heartbeat
-- `acknowledge` - Acknowledge message
-- `request-resync` - Request missing messages
-
-### Server → Client
-- `location-update` - Receive location updates
-- `lag-alert` - Lag alert notification
-- `journey-started` - Journey started
-- `participant-joined` - Participant joined
-- `arrival-detected` - Arrival notification
-- `connection-status` - Connection status update
-
-## Testing 🧪
+## 🔧 Development Commands
 
 ```bash
-# unit tests
+# Start development server
+npm run start:dev
+
+# Build application
+npm run build
+
+# Run tests
 npm run test
 
-# e2e tests
-npm run test:e2e
+# Lint code
+npm run lint
 
-# test coverage
-npm run test:cov
+# Docker development environment
+npm run docker:dev
+npm run docker:down
 ```
 
-## Firebase Setup 🔥
+## 🌐 Deployment
 
-### 1. Create Firebase Project
-1. Go to [Firebase Console](https://console.firebase.google.com/)
-2. Create a new project
-3. Enable Firestore Database
-4. Enable Authentication (Email/Password)
+The application is containerized and ready for deployment:
 
-### 2. Get Service Account Key
-1. Go to Project Settings → Service Accounts
-2. Click "Generate New Private Key"
-3. Save the JSON file
-4. Extract values for `.env`:
-   - `FIREBASE_PROJECT_ID`
-   - `FIREBASE_CLIENT_EMAIL`
-   - `FIREBASE_PRIVATE_KEY`
-
-### 3. Deploy Security Rules
 ```bash
 # Install Firebase CLI
 npm install -g firebase-tools
@@ -348,60 +325,47 @@ docker run -p 3000:3000 --env-file .env tulink-backend
 5. Set up Redis instance
 
 ### Environment Configuration
-**Required Variables** (see `.env.example`):
-- Firebase credentials (FIREBASE_*)
-- Google Maps API key
-- Mapbox tokens
-- Redis connection
-- JWT secrets
+Ensure all environment variables from `.env.example` are set in your production environment.
 
-**Security Note**: Never commit `.env` files - they contain sensitive credentials.
+# Check application health
+curl http://localhost:3000/health
+```
 
-## Key Technologies 🔧
+## 📊 Environment Variables
 
-- [NestJS](https://nestjs.com/) - Progressive Node.js framework
-- [Socket.io](https://socket.io/) - Real-time WebSocket library
-- [Firebase](https://firebase.google.com/) - Backend-as-a-Service
-- [Redis](https://redis.io/) - In-memory data store
-- [Google Maps Platform](https://developers.google.com/maps) - Location services
-- [TypeScript](https://www.typescriptlang.org/) - Type-safe JavaScript
+Required environment variables (see `.env.example`):
 
-## Contributing 🤝
+- `FIREBASE_PROJECT_ID` - Firebase project ID
+- `FIREBASE_API_KEY` - Firebase Web API key
+- `FIREBASE_PRIVATE_KEY` - Service account private key
+- `GOOGLE_MAPS_API_KEY` - Google Maps API key
+- `JWT_SECRET` - JWT signing secret
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+## 🔍 Troubleshooting
 
-## Support 💬
+### Common Issues
 
-For issues or questions:
-1. Check the [documentation](./PROJECT_STATUS.md)
-2. Review [Swagger API docs](http://localhost:3000/api)
-3. Open an issue in the repository
+**Application won't start:**
+```bash
+# Check Docker containers
+docker compose -f config/docker/docker-compose.dev.yml ps
 
-## License 📄
+# Check logs
+docker compose -f config/docker/docker-compose.dev.yml logs -f
+```
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+**Authentication errors:**
+- Verify Firebase configuration in `.env`
+- Check Firebase API key permissions
 
-## Acknowledgments 🙏
+**Database connection issues:**
+- Ensure Redis is running
+- Check Redis connection settings
 
-- Built with [NestJS](https://nestjs.com/)
-- Inspired by Uber's RAMEN real-time architecture
-- Firebase for backend infrastructure
-- Google Maps for location services
+## 📄 License
 
----
+This project is licensed under the MIT License.
 
-## 🔧 Development Status
 
-### ✅ **Deployment Ready**
-- Firebase authentication & refresh tokens: **Working** ✓
-- Environment configuration: **Secure** (using `.env`) ✓
-- Docker setup: **Production-ready** ✓
-- Security rules: **Deployed** ✓
-
-### 🚨 **Recent Fixes**
-- Fixed refresh token functionality (Firebase credentials configured)
-- Cleaned up environment file structure (`.env` only)
-- Updated Docker Compose to use standard `.env`
-- Removed sensitive data from Git tracking
-
-**Status**: ✅ Production Ready | **Build**: ✅ Passing | **Auth**: ✅ Working | **Version**: 1.0.0
+**Status**: ✅ Production Ready | **Build**: ✅ Passing | **Version**: 1.0.0
+# Tu-link-Backend
