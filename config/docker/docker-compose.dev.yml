@@ -4,7 +4,7 @@ services:
     build:
       context: ../../
       dockerfile: config/docker/Dockerfile
-      target: development  # Use development stage for hot reloading
+      target: development
     container_name: tulink-backend-dev
     environment:
       - NODE_ENV=development
@@ -15,8 +15,8 @@ services:
       - ../../.env
     expose:
       - "3000"
-    ports:
-      - "3000:3000"  # Expose on standard port for DigitalOcean deployment
+    # ports:
+      # - "3000:3000"
     depends_on:
       redis:
         condition: service_healthy
@@ -25,9 +25,17 @@ services:
       - traefik-network
     restart: unless-stopped
     volumes:
-      - ../../src:/usr/src/app/src:ro  # Mount source for development
+      - ../../src:/usr/src/app/src:ro
       - ../../logs:/usr/src/app/logs
-    command: npm run start:dev  # Use development start command
+    command: npm run start:dev
+    # Optional Traefik labels (uncomment if you want SSL access via domain)
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tulink-dev.rule=Host(`api.dev.tulink.xyz`)"
+      - "traefik.http.routers.tulink-dev.entrypoints=websecure"
+      - "traefik.http.routers.tulink-dev.tls.certresolver=letsencrypt"
+      - "traefik.http.services.tulink-dev.loadbalancer.server.port=3000"
+      - "traefik.docker.network=traefik-network"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
