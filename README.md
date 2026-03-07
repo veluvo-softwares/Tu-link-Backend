@@ -62,7 +62,6 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
 - **Maps**: Google Maps Platform + Mapbox
 - **Auth**: Firebase Auth
 
-<<<<<<< Updated upstream
 ## Description
 
 Production-ready backend for the "Tu-link" mobile app - a real-time convoy coordination system enabling groups to track locations during travel with lag alerts and arrival detection.
@@ -83,6 +82,7 @@ cp .env.example .env
 # Edit .env with your credentials:
 # - Firebase credentials (Admin SDK + API Key)
 # - Google Maps API key
+# - Mapbox tokens
 # - Redis connection (optional if using Docker)
 ```
 
@@ -93,9 +93,13 @@ cp .env.example .env
 - `FIREBASE_DATABASE_URL` - Your Firestore URL
 - `FIREBASE_API_KEY` - Web API Key (for authentication) **⚠️ Required for login**
 
-### 3. Start Redis
+### 3. Start Development Environment
 ```bash
-docker-compose up -d
+# Using Docker (Recommended - includes Redis)
+npm run docker:dev
+
+# OR manually start Redis and run app
+docker run -d --name redis -p 6379:6379 redis:7-alpine
 ```
 
 ### 4. Install Dependencies
@@ -121,7 +125,10 @@ npm run build
 
 ### 7. Run Application
 ```bash
-# Development mode (with hot-reload)
+# Using Docker (Recommended)
+npm run docker:dev
+
+# OR local development mode (requires Redis running)
 npm run start:dev
 
 # Production mode
@@ -150,9 +157,6 @@ See: README_POSTMAN.md for complete testing guide
 ```
 
 ## API Endpoints 📡
-=======
-## 📡 Key API Endpoints
->>>>>>> Stashed changes
 
 ### Authentication
 - `POST /auth/register` - Register new user
@@ -195,19 +199,29 @@ npm run docker:down
 The application is containerized and ready for deployment:
 
 ```bash
-<<<<<<< Updated upstream
 # Install Firebase CLI
 npm install -g firebase-tools
 
 # Login to Firebase
 firebase login
 
-# Initialize Firebase in project
-firebase init firestore
+# Set Firebase project (if not already configured)
+firebase use tulink-app-1a942
 
-# Deploy rules
-firebase deploy --only firestore:rules
+# Deploy security rules and indexes
+firebase deploy --only firestore
 ```
+
+### 4. Firebase Configuration Files
+These files are **version controlled** and should NOT be in `.gitignore`:
+- `firebase.json` - Firebase project configuration
+- `config/firebase/firestore.rules` - Database security rules
+- `firestore.indexes.json` - Query optimization indexes
+
+**Why tracked in Git:**
+- Team collaboration and consistency
+- Deployment automation
+- Security rule auditing
 
 ## Project Structure 📁
 
@@ -274,34 +288,44 @@ src/
 
 ## Deployment 🚢
 
+### ✅ Production Ready
+This app is **deployment-ready** for DigitalOcean droplets and other cloud providers.
+
 ### Prerequisites
-- Node.js 18+ runtime
+- Node.js 20+ runtime
 - Redis instance
-- Firebase project
+- Firebase project with valid credentials
 - Environment variables configured
 
-### Build for Production
+### Quick Deployment
 ```bash
+# Simple deployment script (development environment)
+./deploy.sh
+
+# Build and run manually
 npm run build
 npm run start:prod
 ```
 
-### Docker Deployment (Optional)
-```dockerfile
-# Dockerfile example
-FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY dist ./dist
-CMD ["node", "dist/main"]
+### Docker Deployment (Recommended)
+```bash
+# Development environment with Docker
+npm run docker:dev
+
+# Production Docker build
+docker build -f config/docker/Dockerfile -t tulink-backend .
+docker run -p 3000:3000 --env-file .env tulink-backend
 ```
+
+### DigitalOcean Droplet Setup
+1. Create droplet with Node.js 20+
+2. Copy `.env.example` to `.env` and configure
+3. Run `./deploy.sh` or use Docker
+4. Configure reverse proxy (nginx) for SSL
+5. Set up Redis instance
 
 ### Environment Configuration
 Ensure all environment variables from `.env.example` are set in your production environment.
-=======
-# Deploy to development environment
-./deploy.sh
 
 # Check application health
 curl http://localhost:3000/health
@@ -339,15 +363,9 @@ docker compose -f config/docker/docker-compose.dev.yml logs -f
 - Check Redis connection settings
 
 ## 📄 License
->>>>>>> Stashed changes
 
 This project is licensed under the MIT License.
 
----
 
-<<<<<<< Updated upstream
 **Status**: ✅ Production Ready | **Build**: ✅ Passing | **Version**: 1.0.0
 # Tu-link-Backend
-=======
-**Status**: ✅ Development Ready | **Build**: ✅ Passing | **Auth**: ✅ Working
->>>>>>> Stashed changes
