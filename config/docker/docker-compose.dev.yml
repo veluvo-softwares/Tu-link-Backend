@@ -18,9 +18,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    networks:
-      - tulink-network
-      - traefik-network
+    # networks:
+      # - tulink-network
+      # - traefik-network
     restart: unless-stopped
     volumes:
       - ../../src:/usr/src/app/src:ro
@@ -49,16 +49,17 @@ services:
       interval: 10s
       timeout: 3s
       retries: 3
-    networks:
-      - tulink-network
+    # networks:
+      # - tulink-network
+      # - traefik-network
     restart: unless-stopped
 
-networks:
-  tulink-network:
-    driver: bridge
-    internal: true
-  traefik-network:
-    external: true
+# networks:
+  # tulink-network:
+  #   driver: bridge
+  #   internal: true
+  # traefik-network:
+  #   external: true
 
 volumes:
   redis_dev_data:
