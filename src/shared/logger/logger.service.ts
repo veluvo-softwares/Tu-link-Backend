@@ -12,7 +12,10 @@ export class LoggerService implements NestLoggerService {
   }
 
   private createLogger(): winston.Logger {
-    const environment = this.configService.get<string>('NODE_ENV', 'development');
+    const environment = this.configService.get<string>(
+      'NODE_ENV',
+      'development',
+    );
     const logLevel = this.configService.get<string>('LOG_LEVEL', 'info');
 
     const formats = [
@@ -25,12 +28,30 @@ export class LoggerService implements NestLoggerService {
     if (environment === 'development') {
       formats.push(winston.format.colorize());
       formats.push(
-        winston.format.printf(({ timestamp, level, message, context, trace, ...meta }) => {
-          const contextStr = context ? `[${context}] ` : '';
-          const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-          const traceStr = trace ? `\n${trace}` : '';
-          return `${timestamp} ${level}: ${contextStr}${message}${metaStr}${traceStr}`;
-        }),
+        winston.format.printf(
+          ({
+            timestamp,
+            level,
+            message,
+            context,
+            trace,
+            ...meta
+          }: {
+            timestamp: string;
+            level: string;
+            message: string;
+            context?: string;
+            trace?: string;
+            [key: string]: any;
+          }) => {
+            const contextStr = context ? `[${String(context)}] ` : '';
+            const safeMetaStr = Object.keys(meta).length
+              ? ` ${JSON.stringify(meta)}`
+              : '';
+            const traceStr = trace ? `\n${String(trace)}` : '';
+            return `${String(timestamp)} ${String(level)}: ${contextStr}${String(message)}${safeMetaStr}${traceStr}`;
+          },
+        ),
       );
     }
 
@@ -81,7 +102,7 @@ export class LoggerService implements NestLoggerService {
     });
   }
 
-  log(message: any, context?: string): void {
+  log(message: string, context?: string): void {
     this.info(message, context);
   }
 
@@ -89,7 +110,12 @@ export class LoggerService implements NestLoggerService {
     this.logger.info(message, { context, ...meta });
   }
 
-  error(message: string, trace?: string, context?: string, meta?: Record<string, any>): void {
+  error(
+    message: string,
+    trace?: string,
+    context?: string,
+    meta?: Record<string, any>,
+  ): void {
     this.logger.error(message, { context, trace, ...meta });
   }
 
@@ -106,7 +132,12 @@ export class LoggerService implements NestLoggerService {
   }
 
   // Journey-specific logging methods
-  logJourneyEvent(event: string, journeyId: string, userId: string, meta?: Record<string, any>): void {
+  logJourneyEvent(
+    event: string,
+    journeyId: string,
+    userId: string,
+    meta?: Record<string, any>,
+  ): void {
     this.info(`Journey ${event}`, 'JourneyService', {
       event,
       journeyId,
@@ -116,7 +147,12 @@ export class LoggerService implements NestLoggerService {
     });
   }
 
-  logLocationUpdate(journeyId: string, userId: string, location: { lat: number; lng: number }, meta?: Record<string, any>): void {
+  logLocationUpdate(
+    journeyId: string,
+    userId: string,
+    location: { lat: number; lng: number },
+    meta?: Record<string, any>,
+  ): void {
     this.debug('Location updated', 'LocationService', {
       journeyId,
       userId,
@@ -126,7 +162,11 @@ export class LoggerService implements NestLoggerService {
     });
   }
 
-  logAuthEvent(event: string, userId: string, meta?: Record<string, any>): void {
+  logAuthEvent(
+    event: string,
+    userId: string,
+    meta?: Record<string, any>,
+  ): void {
     this.info(`Auth ${event}`, 'AuthService', {
       event,
       userId,
@@ -135,7 +175,13 @@ export class LoggerService implements NestLoggerService {
     });
   }
 
-  logApiRequest(method: string, path: string, userId?: string, duration?: number, statusCode?: number): void {
+  logApiRequest(
+    method: string,
+    path: string,
+    userId?: string,
+    duration?: number,
+    statusCode?: number,
+  ): void {
     this.info('API Request', 'HTTP', {
       method,
       path,
