@@ -39,10 +39,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
         statusCode,
         path: request.url,
         method: request.method,
-        userId: (request as any).user?.uid,
+        userId: (request as Request & { user?: { uid: string } }).user?.uid,
         userAgent: request.headers['user-agent'],
         ip: request.ip,
-        exception: exception instanceof Error ? exception.name : typeof exception,
+        exception:
+          exception instanceof Error ? exception.name : typeof exception,
       },
     );
 

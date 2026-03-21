@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -75,7 +75,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -107,7 +107,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
@@ -135,7 +135,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push Docker image
@@ -154,8 +154,8 @@ jobs:
     name: Deploy to DigitalOcean
     runs-on: ubuntu-latest
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
+    if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
+    environment: development
 
     steps:
       - name: Checkout code
@@ -179,37 +179,28 @@ jobs:
             cd /opt/tulink-backend
             
             # Create backup of current deployment
-            sudo cp docker-compose.prod.yml docker-compose.prod.yml.backup.$(date +%Y%m%d_%H%M%S)
+            sudo cp config/docker/docker-compose.dev.yml config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S)
             
             # Pull latest changes
             git fetch origin
-            git reset --hard origin/main
+            git reset --hard origin/dev
             
-            # Pull new Docker image
-            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker pull ${{ needs.build.outputs.image-tag }}
+            # Stop current containers
+            docker compose -f config/docker/docker-compose.dev.yml down
             
-            # Update docker-compose with new image
-            sed -i 's|image:.*|image: ${{ needs.build.outputs.image-tag }}|' docker-compose.prod.yml
-            
-            # Health check before deployment
-            if ! curl -f http://localhost:3000/health > /dev/null 2>&1; then
-              echo "Current deployment is unhealthy, proceeding with deployment..."
-            fi
-            
-            # Deploy with zero-downtime strategy
-            docker-compose -f docker-compose.prod.yml up -d --no-deps app
+            # Start containers with latest code (rebuild with new changes)
+            docker compose -f config/docker/docker-compose.dev.yml up -d --build
             
             # Wait for health check
             echo "Waiting for application to be healthy..."
             for i in {1..30}; do
-              if curl -f http://localhost:3000/health/ready > /dev/null 2>&1; then
+              if curl -f http://localhost:3000/health > /dev/null 2>&1; then
                 echo "Application is healthy!"
                 break
               fi
               if [ $i -eq 30 ]; then
                 echo "Health check failed after 30 attempts, rolling back..."
-                docker-compose -f docker-compose.prod.yml.backup.$(date +%Y%m%d_%H%M%S) up -d
+                docker compose -f config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S) up -d
                 exit 1
               fi
               echo "Attempt $i/30: Application not ready yet, waiting..."
@@ -220,7 +211,7 @@ jobs:
             docker image prune -f
             
             # Remove old backups (keep last 5)
-            ls -t docker-compose.prod.yml.backup.* 2>/dev/null | tail -n +6 | xargs -r rm
+            ls -t config/docker/docker-compose.dev.yml.backup.* 2>/dev/null | tail -n +6 | xargs -r rm
             
             echo "Deployment completed successfully!"
           EOF

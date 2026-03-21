@@ -21,7 +21,6 @@ import { MapsModule } from './modules/maps/maps.module';
 import { LocationModule } from './modules/location/location.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
-import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -35,7 +34,6 @@ import { HealthModule } from './modules/health/health.module';
     FirebaseModule,
     RedisModule,
     // Feature modules
-    HealthModule,
     AuthModule,
     JourneyModule,
     MapsModule,
