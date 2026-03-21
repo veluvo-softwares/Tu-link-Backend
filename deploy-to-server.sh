@@ -33,9 +33,9 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 # Check traefik network
-if ! docker network ls | grep -q "traefik-network"; then
-    error "traefik-network not found. Please ensure existing infrastructure is running."
-fi
+# if ! docker network ls | grep -q "traefik-network"; then
+#     error "traefik-network not found. Please ensure existing infrastructure is running."
+# fi
 
 # Setup app directory
 log "📁 Setting up application directory..."

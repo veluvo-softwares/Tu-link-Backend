@@ -12,6 +12,7 @@ import mapsConfig from './config/maps.config';
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
+import { LoggerModule } from './shared/logger/logger.module';
 
 // Feature modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -20,6 +21,7 @@ import { MapsModule } from './modules/maps/maps.module';
 import { LocationModule } from './modules/location/location.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { HealthModule } from './modules/health/health.module';
 
 @Module({
   imports: [
@@ -29,9 +31,11 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
       load: [appConfig, firebaseConfig, redisConfig, mapsConfig],
     }),
     // Shared modules
+    LoggerModule,
     FirebaseModule,
     RedisModule,
     // Feature modules
+    HealthModule,
     AuthModule,
     JourneyModule,
     MapsModule,

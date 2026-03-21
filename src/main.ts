@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { TimestampConversionInterceptor } from './common/interceptors/timestamp-conversion.interceptor';
+import { LoggerService } from './shared/logger/logger.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -15,8 +16,11 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Get the LoggerService from the app context
+  const logger = app.get(LoggerService);
+
   // Global exception filter for standardized error responses
-  app.useGlobalFilters(new HttpExceptionFilter());
+  app.useGlobalFilters(new HttpExceptionFilter(logger));
 
   // Global interceptor to convert Firestore Timestamps to ISO 8601 strings
   // This MUST run before ResponseInterceptor
