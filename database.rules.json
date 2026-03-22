@@ -1,0 +1,15 @@
+{
+  "rules": {
+    "journeys": {
+      "$journeyId": {
+        "members": {
+          "$userId": {
+            ".read": "auth != null",
+            ".write": "auth != null && auth.uid === $userId",
+            ".validate": "newData.hasChildren(['lat', 'lng', 'timestamp', 'userId']) && newData.child('lat').isNumber() && newData.child('lng').isNumber() && newData.child('timestamp').isNumber() && newData.child('userId').isString()"
+          }
+        }
+      }
+    }
+  }
+}
