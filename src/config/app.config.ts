@@ -30,4 +30,5 @@ export default registerAs('app', () => ({
   heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '7000', 10),
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
+  rtdbCleanupDelayMs: parseInt(process.env.RTDB_CLEANUP_DELAY_MS || '5000', 10),
 }));

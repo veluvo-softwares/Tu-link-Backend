@@ -34,7 +34,6 @@ export class LocationController {
       userId,
       locationUpdateDto,
     );
-
     return {
       success: result.success,
       sequenceNumber: result.sequenceNumber,
