@@ -4,17 +4,19 @@ import {
   ArgumentsHost,
   HttpException,
   HttpStatus,
-  Logger,
+  Injectable,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { LoggerService } from '../../shared/logger/logger.service';
 import {
   ApiErrorResponse,
   ValidationErrorDetail,
 } from '../interfaces/api-response.interface';
 
+@Injectable()
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  private readonly logger = new Logger(HttpExceptionFilter.name);
+  constructor(private readonly logger: LoggerService) {}
 
   catch(exception: unknown, host: ArgumentsHost) {
     const ctx = host.switchToHttp();
@@ -28,10 +30,21 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode,
     );
 
-    // Log error details
+    // Log error details with enhanced context
     this.logger.error(
       `${request.method} ${request.url} - Status: ${statusCode}`,
-      exception instanceof Error ? exception.stack : JSON.stringify(exception),
+      exception instanceof Error ? exception.stack : undefined,
+      'HttpExceptionFilter',
+      {
+        statusCode,
+        path: request.url,
+        method: request.method,
+        userId: (request as Request & { user?: { uid: string } }).user?.uid,
+        userAgent: request.headers['user-agent'],
+        ip: request.ip,
+        exception:
+          exception instanceof Error ? exception.name : typeof exception,
+      },
     );
 
     response.status(statusCode).json(errorResponse);
