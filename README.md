@@ -102,17 +102,29 @@ npm run docker:dev
 docker run -d --name redis -p 6379:6379 redis:7-alpine
 ```
 
+**Local Development Configuration:**
+For local development, comment out the following lines in `config/docker/docker-compose.dev.yml`:
+- Line 25: `- web # Comment out for local development`  
+- Line 61: `internal: true  # Comment out on local to allow port access for local development`
+- Lines 62-63: The entire `web:` network block
+
+This allows proper network access and Redis connectivity for local development.
+
 ### 4. Install Dependencies
 ```bash
 npm install
 ```
 
-### 5. Setup Firestore Indexes
+### 5. Setup Firestore Indexes and RTDB Rules
 ```bash
-# Deploy required indexes for queries
+# Deploy required indexes for queries and RTDB security rules
 firebase login
 firebase use tulink-app-1a942
-firebase deploy --only firestore:indexes
+firebase deploy --only firestore:indexes,database
+
+# OR separately:
+firebase deploy --only firestore:indexes  # Firestore indexes
+firebase deploy --only database           # RTDB security rules
 
 # OR click the index creation URL when you first encounter the error
 # See docs/FIRESTORE_INDEX_SETUP.md for detailed instructions

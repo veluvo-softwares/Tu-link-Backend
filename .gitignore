@@ -53,4 +53,11 @@ pids
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
+# Firebase service account — this is the secret
+firebase-adminsdk-*.json
+serviceAccountKey.json
+
+# Firebase local emulator data
+.firebase/
+
 /Docs

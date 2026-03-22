@@ -22,7 +22,7 @@ services:
         condition: service_healthy
     networks:
       - tulink-network
-      - web
+      - web # Comment out for local development
     restart: unless-stopped
     volumes:
       - ../../src:/usr/src/app/src:ro
@@ -58,8 +58,8 @@ services:
 networks:
   tulink-network:
     driver: bridge
-    internal: true
-  web:
+    internal: true  # Comment out on local to allow port access for local development
+  web:  # Comment out on local to allow port access for local development
     external: true
 
 volumes:

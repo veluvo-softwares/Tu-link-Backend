@@ -16,6 +16,7 @@ import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { LoggerService } from '../../shared/logger/logger.service';
 import { ParticipantService } from '../journey/services/participant.service';
 import { LocationService } from './location.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
@@ -44,6 +45,7 @@ export class LocationGateway
     private participantService: ParticipantService,
     private locationService: LocationService,
     private configService: ConfigService,
+    private logger: LoggerService,
   ) {}
 
   /**
@@ -119,6 +121,9 @@ export class LocationGateway
           userId,
           'DISCONNECTED',
         );
+
+        // Remove member position from RTDB
+        await this.firebaseService.removeMemberPosition(journeyId, userId);
 
         // Notify other participants
         this.server
@@ -226,6 +231,9 @@ export class LocationGateway
         'DISCONNECTED',
       );
 
+      // Remove member position from RTDB
+      await this.firebaseService.removeMemberPosition(journeyId, userId);
+
       // Clear from client data
       client.data.journeyId = null;
 
@@ -270,6 +278,14 @@ export class LocationGateway
 
       if (!result.success) {
         // Throttled - don't broadcast
+        this.logger.info(
+          `Location update received — userId resolved as: ${userId}`,
+          'LocationGateway',
+        );
+        this.logger.info(
+          `Location update received — result: ${JSON.stringify(result)}`,
+          'LocationGateway',
+        );
         return;
       }
 

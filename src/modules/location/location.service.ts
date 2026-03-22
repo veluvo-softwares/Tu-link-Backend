@@ -56,6 +56,10 @@ export class LocationService {
   }> {
     const { journeyId } = locationUpdateDto;
 
+    console.error(
+      `LocationService: Processing update for userId: ${userId}, journeyId: ${journeyId}`,
+    );
+
     // 1. Validate participant membership and journey status
     await this.validateParticipant(userId, journeyId);
 
@@ -136,17 +140,46 @@ export class LocationService {
       timestamp: Date.now(),
     };
 
-    // 10. Store in Firestore (persistence)
-    await this.saveLocationToFirestore(locationUpdate);
+    // 10. Store in RTDB (primary live source) - awaited
+    const rtdbPayload = {
+      lat: locationUpdateDto.location.latitude,
+      lng: locationUpdateDto.location.longitude,
+      accuracy: locationUpdateDto.accuracy,
+      heading: locationUpdateDto.heading ?? null,
+      speed: locationUpdateDto.speed ?? null,
+      altitude: locationUpdateDto.altitude ?? null,
+      timestamp: locationUpdateDto.timestamp,
+      userId,
+      sequenceNumber,
+      priority,
+      metadata: {
+        batteryLevel: locationUpdateDto.metadata?.batteryLevel ?? null,
+        isMoving: locationUpdateDto.metadata?.isMoving ?? null,
+        statusChange: locationUpdateDto.metadata?.statusChange ?? null,
+      },
+    };
+    await this.firebaseService.setMemberPosition(
+      journeyId,
+      userId,
+      rtdbPayload,
+    );
 
-    // 11. Update Redis cache (hot data)
+    // 11. Store in Firestore (persistence) - fire-and-forget
+    this.persistToFirestore(locationUpdate).catch((err: Error) =>
+      console.error(
+        `Firestore persist failed for user ${userId}: ${err.message}`,
+        err.stack,
+      ),
+    );
+
+    // 12. Update Redis cache (hot data)
     await this.redisService.cacheLocation(
       journeyId,
       participant.id,
       locationUpdate,
     );
 
-    // 12. Detect lag (for followers only)
+    // 13. Detect lag (for followers only)
     let lagAlert: any = undefined;
     if (participant.role === 'FOLLOWER') {
       lagAlert = await this.lagDetectionService.detectLag(
@@ -155,13 +188,13 @@ export class LocationService {
       );
     }
 
-    // 13. Detect arrival
+    // 14. Detect arrival
     const arrivalDetected = await this.arrivalDetectionService.detectArrival(
       locationUpdate,
       journey,
     );
 
-    // 14. Add to pending deliveries if HIGH priority
+    // 15. Add to pending deliveries if HIGH priority
     if (this.acknowledgmentService.requiresAcknowledgment(priority)) {
       const journeyParticipants =
         await this.redisService.getJourneyParticipants(journeyId);
@@ -189,9 +222,10 @@ export class LocationService {
   }
 
   /**
-   * Save location update to Firestore
+   * Persists location to Firestore for history and analytics.
+   * Called asynchronously — failures are logged but do not affect the live update response.
    */
-  private async saveLocationToFirestore(update: LocationUpdate): Promise<void> {
+  private async persistToFirestore(update: LocationUpdate): Promise<void> {
     const locationRef = this.firebaseService.firestore
       .collection('journeys')
       .doc(update.journeyId)
