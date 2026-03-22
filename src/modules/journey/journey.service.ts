@@ -135,6 +135,19 @@ export class JourneyService {
         endTime: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+
+    // Clean up RTDB positions after a delay
+    const cleanupDelayMs =
+      this.configService.get<number>('app.rtdbCleanupDelayMs') ?? 5000;
+    setTimeout(() => {
+      this.firebaseService
+        .clearJourneyPositions(journeyId)
+        .catch((err) =>
+          console.error(
+            `RTDB cleanup failed for journey ${journeyId}: ${err.message}`,
+          ),
+        );
+    }, cleanupDelayMs);
   }
 
   async start(journeyId: string, userId: string): Promise<Journey> {
@@ -217,6 +230,19 @@ export class JourneyService {
         endTime: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
+
+    // Clean up RTDB positions after a delay
+    const cleanupDelayMs =
+      this.configService.get<number>('app.rtdbCleanupDelayMs') ?? 5000;
+    setTimeout(() => {
+      this.firebaseService
+        .clearJourneyPositions(journeyId)
+        .catch((err) =>
+          console.error(
+            `RTDB cleanup failed for journey ${journeyId}: ${err.message}`,
+          ),
+        );
+    }, cleanupDelayMs);
 
     // Remove from active journeys in Redis
     await this.redisService.removeActiveJourney(journeyId);
