@@ -12,6 +12,7 @@ import mapsConfig from './config/maps.config';
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
+import { LoggerModule } from './shared/logger/logger.module';
 
 // Feature modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -29,6 +30,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
       load: [appConfig, firebaseConfig, redisConfig, mapsConfig],
     }),
     // Shared modules
+    LoggerModule,
     FirebaseModule,
     RedisModule,
     // Feature modules
