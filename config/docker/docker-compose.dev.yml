@@ -42,10 +42,10 @@ services:
     expose:
       - "6379"
     ports:
-      - "6380:6379"  # Expose Redis for development debugging
+      - "6380:6379"
     volumes:
       - redis_dev_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --save "" --stop-writes-on-bgsave-error no
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
