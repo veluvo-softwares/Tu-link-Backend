@@ -63,3 +63,21 @@ export interface CachedLocation {
     statusChange?: boolean;
   };
 }
+
+export interface LocationHistoryResponse {
+  locations: LocationHistory[];
+  destination?: {
+    latitude: number;
+    longitude: number;
+  };
+  destinationAddress?: string;
+}
+
+export interface LatestLocationsResponse {
+  locations: Record<string, LocationUpdate>;
+  destination?: {
+    latitude: number;
+    longitude: number;
+  };
+  destinationAddress?: string;
+}
