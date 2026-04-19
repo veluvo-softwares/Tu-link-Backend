@@ -20,6 +20,8 @@ import { LocationUpdateDto } from './dto/location-update.dto';
 import {
   LocationUpdate,
   LocationHistory,
+  LocationHistoryResponse,
+  LatestLocationsResponse,
 } from '../../shared/interfaces/location.interface';
 import { Priority } from '../../types/priority.type';
 import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
@@ -258,13 +260,12 @@ export class LocationService {
   }
 
   /**
-   * Get location history for a journey
+   * Get latest location per participant for a journey
    */
   async getLocationHistory(
     journeyId: string,
     userId: string,
-    limit: number = 100,
-  ): Promise<LocationHistory[]> {
+  ): Promise<LocationHistoryResponse> {
     // Verify user is a participant
     const isParticipant = await this.participantService.isParticipant(
       journeyId,
@@ -274,18 +275,63 @@ export class LocationService {
       throw new ForbiddenException('Not a participant of this journey');
     }
 
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('locations')
-      .orderBy('timestamp', 'desc')
-      .limit(limit)
-      .get();
+    // Get journey details for destination information
+    const journey = await this.journeyService.findById(journeyId);
 
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as LocationHistory[];
+    // Get all participants in the journey
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
+
+    // Get latest location for each participant
+    const latestLocations: LocationHistory[] = [];
+
+    for (const participant of participants) {
+      const snapshot = await this.firebaseService.firestore
+        .collection('journeys')
+        .doc(journeyId)
+        .collection('locations')
+        .where('participantId', '==', participant.id)
+        .orderBy('timestamp', 'desc')
+        .limit(1)
+        .get();
+
+      if (!snapshot.empty) {
+        const locationData = snapshot.docs[0].data();
+        latestLocations.push({
+          id: snapshot.docs[0].id,
+          ...locationData,
+        } as LocationHistory);
+      }
+    }
+
+    // Sort by timestamp descending (most recent first)
+    latestLocations.sort((a, b) => {
+      const aTime = a.timestamp?.toMillis?.() || 0;
+      const bTime = b.timestamp?.toMillis?.() || 0;
+      return bTime - aTime;
+    });
+
+    // Prepare response with destination coordinates
+    const response: {
+      locations: LocationHistory[];
+      destination?: { latitude: number; longitude: number };
+      destinationAddress?: string;
+    } = {
+      locations: latestLocations,
+    };
+
+    if (journey.destination) {
+      response.destination = {
+        latitude: journey.destination.latitude,
+        longitude: journey.destination.longitude,
+      };
+    }
+
+    if (journey.destinationAddress) {
+      response.destinationAddress = journey.destinationAddress;
+    }
+
+    return response;
   }
 
   /**
@@ -294,7 +340,7 @@ export class LocationService {
   async getLatestLocations(
     journeyId: string,
     userId: string,
-  ): Promise<Record<string, LocationUpdate>> {
+  ): Promise<LatestLocationsResponse> {
     // Verify user is a participant
     const isParticipant = await this.participantService.isParticipant(
       journeyId,
@@ -303,6 +349,9 @@ export class LocationService {
     if (!isParticipant) {
       throw new ForbiddenException('Not a participant of this journey');
     }
+
+    // Get journey details for destination information
+    const journey = await this.journeyService.findById(journeyId);
 
     const participants =
       await this.redisService.getJourneyParticipants(journeyId);
@@ -318,7 +367,27 @@ export class LocationService {
       }
     }
 
-    return locations;
+    // Prepare response with destination coordinates
+    const response: {
+      locations: Record<string, LocationUpdate>;
+      destination?: { latitude: number; longitude: number };
+      destinationAddress?: string;
+    } = {
+      locations,
+    };
+
+    if (journey.destination) {
+      response.destination = {
+        latitude: journey.destination.latitude,
+        longitude: journey.destination.longitude,
+      };
+    }
+
+    if (journey.destinationAddress) {
+      response.destinationAddress = journey.destinationAddress;
+    }
+
+    return response;
   }
 
   /**
