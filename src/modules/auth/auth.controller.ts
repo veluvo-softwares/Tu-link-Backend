@@ -4,9 +4,11 @@ import {
   Get,
   Put,
   Body,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
+  ParseIntPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -173,5 +175,66 @@ export class AuthController {
     @Body() updateProfileDto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(uid, updateProfileDto);
+  }
+
+  @Get('searchUser')
+  @UseGuards(FirebaseAuthGuard)
+  @ApiBearerAuth('bearer')
+  @ApiOperation({
+    summary: 'Search users by display name or email',
+    description: `Search for users to invite to journeys. Returns matching users based on display name or email.
+    
+**Search Features:**
+- Case-insensitive search
+- Searches both display name and email fields
+- Returns multiple users for common names (e.g., wesley nyamu, wesley muriithi)
+- Minimum query length: 2 characters
+- Default limit: 10 users
+
+**Use Cases:**
+- Finding users to invite to journeys
+- User discovery for convoy formation
+- Contact search functionality`,
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Search completed successfully. Returns array of matching users.',
+    schema: {
+      type: 'object',
+      properties: {
+        users: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              uid: { type: 'string', description: 'User Firebase UID' },
+              email: { type: 'string', description: 'User email address' },
+              displayName: { type: 'string', description: 'User display name' },
+              phoneNumber: {
+                type: 'string',
+                description: 'User phone number',
+                nullable: true,
+              },
+            },
+          },
+        },
+        total: { type: 'number', description: 'Number of users found' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Query too short (minimum 2 characters)',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or expired token',
+  })
+  async searchUser(
+    @Query('query') query: string,
+    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+  ) {
+    return this.authService.searchUsers(query, limit || 10);
   }
 }

@@ -51,13 +51,8 @@ export class LocationController {
   async getLocationHistory(
     @Param('journeyId') journeyId: string,
     @CurrentUser('uid') userId: string,
-    @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
-    return this.locationService.getLocationHistory(
-      journeyId,
-      userId,
-      limit || 100,
-    );
+    return this.locationService.getLocationHistory(journeyId, userId);
   }
 
   /**

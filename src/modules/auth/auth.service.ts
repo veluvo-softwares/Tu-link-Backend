@@ -14,6 +14,10 @@ import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../../shared/interfaces/user.interface';
 import { AuthResponse } from './interfaces/auth-response.interface';
+import {
+  SearchUserResponse,
+  SearchUserResult,
+} from './interfaces/search-user-response.interface';
 import { FieldValue } from 'firebase-admin/firestore';
 import { convertCommonTimestamps } from '../../common/utils/date.utils';
 import axios from 'axios';
@@ -361,6 +365,83 @@ export class AuthService {
         throw new NotFoundException('User not found');
       }
       throw error;
+    }
+  }
+
+  async searchUsers(
+    query: string,
+    limit: number = 10,
+  ): Promise<SearchUserResponse> {
+    try {
+      const normalizedQuery = query.toLowerCase().trim();
+
+      // Search by display name (case-insensitive)
+      const displayNameQuery = this.firebaseService.firestore
+        .collection('users')
+        .where('displayName', '>=', query)
+        .where('displayName', '<=', query + '\uf8ff')
+        .limit(limit);
+
+      // Search by email (case-insensitive)
+      const emailQuery = this.firebaseService.firestore
+        .collection('users')
+        .where('email', '>=', normalizedQuery)
+        .where('email', '<=', normalizedQuery + '\uf8ff')
+        .limit(limit);
+
+      // Execute both queries in parallel
+      const [displayNameSnapshot, emailSnapshot] = await Promise.all([
+        displayNameQuery.get(),
+        emailQuery.get(),
+      ]);
+
+      // Combine results and remove duplicates
+      const userMap = new Map<string, SearchUserResult>();
+
+      // Process display name results
+      displayNameSnapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        if (data.displayName?.toLowerCase().includes(normalizedQuery)) {
+          userMap.set(doc.id, {
+            uid: doc.id,
+
+            email: (data.email as string) || '',
+
+            displayName: (data.displayName as string) || '',
+
+            phoneNumber: data.phoneNumber as string,
+          });
+        }
+      });
+
+      // Process email results
+      emailSnapshot.docs.forEach((doc) => {
+        const data = doc.data();
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+        if (data.email?.toLowerCase().includes(normalizedQuery)) {
+          userMap.set(doc.id, {
+            uid: doc.id,
+
+            email: (data.email as string) || '',
+
+            displayName: (data.displayName as string) || '',
+
+            phoneNumber: data.phoneNumber as string,
+          });
+        }
+      });
+
+      // Convert to array and apply limit
+      const users = Array.from(userMap.values()).slice(0, limit);
+
+      return {
+        users,
+        total: users.length,
+      };
+    } catch (error) {
+      console.error('User search error:', error);
+      throw new Error('Failed to search users');
     }
   }
 }
