@@ -343,6 +343,30 @@ Ensure all environment variables from `.env.example` are set in your production 
 curl http://localhost:3000/health
 ```
 
+## 📮 Postman Collection
+
+A comprehensive Postman collection is available for API testing and development:
+
+**Location**: `postman collection/Tu-Link-Backend.postman_collection.json`
+
+### Quick Setup
+1. Import the collection into Postman
+2. Set up environment variables for base URL and authentication tokens
+3. Test all 40+ endpoints including:
+   - User authentication flow
+   - Journey management
+   - Real-time location tracking
+   - Invitation system
+
+### Collection Features
+- Pre-configured requests for all API endpoints
+- Authentication token management
+- Sample request/response data
+- Environment variable support
+- Test scripts for common workflows
+
+For detailed testing instructions, see the [Testing Guide](./docs/POSTMAN_TESTING_GUIDE.md).
+
 ## 📊 Environment Variables
 
 Required environment variables (see `.env.example`):
