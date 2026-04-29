@@ -75,16 +75,25 @@ export class LocationGateway
       // Map socket to user in Redis
       await this.redisService.setSocketUser(client.id, userId);
 
-      console.log(`Client connected: ${client.id} (User: ${userId})`);
+      // Start heartbeat monitoring with grace period
+      const gracePeriod =
+        this.configService.get('app.wsConnectionGracePeriodMs') || 5000;
+
+      console.log(`[WebSocket] Connection established: ${client.id}`, {
+        userId,
+        timestamp: new Date().toISOString(),
+        gracePeriod: `${gracePeriod}ms`,
+        journeyAttempt: client.handshake.query?.journeyId || 'none',
+      });
 
       // Send connection success
       client.emit('connection-status', {
         status: 'CONNECTED',
         message: 'Successfully connected to location service',
       });
-
-      // Start heartbeat monitoring
-      this.startHeartbeatMonitoring(client);
+      setTimeout(() => {
+        this.startHeartbeatMonitoring(client);
+      }, gracePeriod);
     } catch (error) {
       console.error('Connection authentication failed:', error);
       client.emit('error', { message: 'Authentication failed' });
@@ -151,11 +160,30 @@ export class LocationGateway
     const { journeyId } = payload;
 
     try {
-      // Verify participant membership
-      const isParticipant = await this.participantService.isParticipant(
-        journeyId,
-        userId,
-      );
+      // Verify participant membership with retry logic for database lag
+      const maxRetries =
+        this.configService.get('app.participantVerificationRetryCount') || 3;
+      let isParticipant = false;
+      let retryCount = 0;
+
+      while (!isParticipant && retryCount < maxRetries) {
+        isParticipant = await this.participantService.isParticipant(
+          journeyId,
+          userId,
+        );
+        if (!isParticipant) {
+          retryCount++;
+          if (retryCount < maxRetries) {
+            console.log(
+              `[WebSocket] Participant verification retry ${retryCount}/${maxRetries} for user ${userId} in journey ${journeyId}`,
+            );
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000 * retryCount),
+            );
+          }
+        }
+      }
+
       if (!isParticipant) {
         throw new WsException('Not a participant of this journey');
       }
@@ -453,10 +481,23 @@ export class LocationGateway
     const heartbeatInterval = this.configService.get('app.heartbeatIntervalMs');
     const heartbeatTimeout = this.configService.get('app.heartbeatTimeoutMs');
 
+    console.log(
+      `[WebSocket] Heartbeat monitoring started for ${client.id} with ${heartbeatTimeout}ms timeout`,
+    );
+
     // Set initial timeout
     const timeout = setTimeout(() => {
-      console.log(`Heartbeat timeout for client ${client.id}`);
-      client.emit('connection-status', { status: 'TIMEOUT' });
+      console.log(`[WebSocket] Heartbeat timeout for client ${client.id}`, {
+        userId: client.data.userId,
+        journeyId: client.data.journeyId,
+        timeout: `${heartbeatTimeout}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      client.emit('connection-status', {
+        status: 'TIMEOUT',
+        reason: 'Heartbeat timeout',
+        timestamp: Date.now(),
+      });
       client.disconnect();
     }, heartbeatTimeout);
 
@@ -476,8 +517,17 @@ export class LocationGateway
     // Set new timeout
     const heartbeatTimeout = this.configService.get('app.heartbeatTimeoutMs');
     const timeout = setTimeout(() => {
-      console.log(`Heartbeat timeout for client ${client.id}`);
-      client.emit('connection-status', { status: 'TIMEOUT' });
+      console.log(`[WebSocket] Heartbeat timeout for client ${client.id}`, {
+        userId: client.data.userId,
+        journeyId: client.data.journeyId,
+        timeout: `${heartbeatTimeout}ms`,
+        timestamp: new Date().toISOString(),
+      });
+      client.emit('connection-status', {
+        status: 'TIMEOUT',
+        reason: 'Heartbeat timeout',
+        timestamp: Date.now(),
+      });
       client.disconnect();
     }, heartbeatTimeout);
 

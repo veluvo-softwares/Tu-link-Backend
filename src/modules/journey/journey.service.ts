@@ -6,6 +6,8 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
@@ -15,6 +17,7 @@ import { NotificationService } from '../notification/notification.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
+import { LocationGateway } from '../location/location.gateway';
 import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
 @Injectable()
@@ -25,6 +28,8 @@ export class JourneyService {
     private participantService: ParticipantService,
     private notificationService: NotificationService,
     private configService: ConfigService,
+    @Inject(forwardRef(() => LocationGateway))
+    private locationGateway: LocationGateway,
   ) {}
 
   async create(
@@ -208,7 +213,23 @@ export class JourneyService {
       participantIds,
     );
 
-    return this.findById(journeyId);
+    // Notify WebSocket gateway about journey start
+    const updatedJourney = await this.findById(journeyId);
+    if (this.configService.get('app.journeyStartBroadcastEnabled')) {
+      try {
+        await this.locationGateway.broadcastJourneyStarted(
+          journeyId,
+          updatedJourney,
+        );
+      } catch (error) {
+        console.error(
+          `Failed to broadcast journey started for ${journeyId}:`,
+          error,
+        );
+      }
+    }
+
+    return updatedJourney;
   }
 
   async end(journeyId: string, userId: string): Promise<Journey> {

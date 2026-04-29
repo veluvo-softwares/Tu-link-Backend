@@ -5,6 +5,8 @@ import {
   Injectable,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
@@ -31,6 +33,7 @@ export class LocationService {
   constructor(
     private firebaseService: FirebaseService,
     private redisService: RedisService,
+    @Inject(forwardRef(() => JourneyService))
     private journeyService: JourneyService,
     private participantService: ParticipantService,
     private priorityService: PriorityService,

@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { LocationController } from './location.controller';
 import { LocationService } from './location.service';
@@ -19,7 +19,7 @@ import appConfig from '../../config/app.config';
     ConfigModule.forFeature(appConfig),
     FirebaseModule,
     RedisModule,
-    JourneyModule,
+    forwardRef(() => JourneyModule),
     MapsModule,
   ],
   controllers: [LocationController],

@@ -27,8 +27,18 @@ export default registerAs('app', () => ({
     process.env.HEARTBEAT_INTERVAL_MS || '4000',
     10,
   ),
-  heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '7000', 10),
+  heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '15000', 10),
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
   rtdbCleanupDelayMs: parseInt(process.env.RTDB_CLEANUP_DELAY_MS || '5000', 10),
+  wsConnectionGracePeriodMs: parseInt(
+    process.env.WS_CONNECTION_GRACE_PERIOD_MS || '5000',
+    10,
+  ),
+  participantVerificationRetryCount: parseInt(
+    process.env.PARTICIPANT_VERIFICATION_RETRY_COUNT || '3',
+    10,
+  ),
+  journeyStartBroadcastEnabled:
+    process.env.JOURNEY_START_BROADCAST_ENABLED !== 'false',
 }));
