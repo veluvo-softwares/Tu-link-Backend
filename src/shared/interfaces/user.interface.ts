@@ -5,6 +5,8 @@ export interface User {
   email: string;
   displayName: string;
   phoneNumber?: string;
+  emailVerified?: boolean;
+  phoneVerified?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

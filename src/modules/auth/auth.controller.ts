@@ -20,6 +20,9 @@ import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -236,5 +239,111 @@ export class AuthController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
     return this.authService.searchUsers(query, limit || 10);
+  }
+
+  @Post('send-email-verification')
+  @UseGuards(FirebaseAuthGuard)
+  @ApiBearerAuth('bearer')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send email verification',
+    description: `Send email verification link to user's registered email address.
+    
+**Important Notes:**
+- User must be authenticated
+- Email verification link is sent to the user's registered email
+- Link expires after 1 hour
+- Can be called multiple times if needed`,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Email verification sent successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - invalid or expired token',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'User does not have an email address',
+  })
+  async sendEmailVerification(@CurrentUser('uid') uid: string) {
+    return this.authService.sendEmailVerification(uid);
+  }
+
+  @Post('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Verify email address',
+    description: `Verify user email address using the OOB code from verification email.
+    
+**Process:**
+1. User clicks verification link in email
+2. Extract OOB code from URL
+3. Submit code to this endpoint
+4. Email becomes verified in user profile`,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Email verified successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        emailVerified: { type: 'boolean' },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid or expired verification code',
+  })
+  async verifyEmail(@Body() verifyEmailDto: VerifyEmailDto) {
+    return this.authService.verifyEmail(verifyEmailDto.oobCode);
+  }
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Send password reset email',
+    description: `Send password reset link to user's email address.
+    
+**Security Features:**
+- Returns success even for non-existent emails (prevents user enumeration)
+- Password reset link expires after 1 hour
+- Previous reset links are invalidated when new one is generated`,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Password reset email sent (or would be sent if email exists)',
+  })
+  @ApiResponse({ status: 400, description: 'Invalid email format' })
+  async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
+    return this.authService.sendPasswordReset(forgotPasswordDto.email);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Reset password using OOB code',
+    description: `Reset user password using OOB code from password reset email.
+    
+**Process:**
+1. User clicks password reset link in email
+2. Extract OOB code from URL
+3. User enters new password
+4. Submit code and new password to this endpoint`,
+  })
+  @ApiResponse({ status: 200, description: 'Password reset successfully' })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid, expired, or already used reset code',
+  })
+  async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
+    return this.authService.resetPassword(
+      resetPasswordDto.oobCode,
+      resetPasswordDto.newPassword,
+    );
   }
 }
