@@ -18,6 +18,10 @@ import {
   SearchUserResponse,
   SearchUserResult,
 } from './interfaces/search-user-response.interface';
+import {
+  VerificationResponse,
+  EmailVerificationResponse,
+} from './interfaces/verification-response.interface';
 import { FieldValue } from 'firebase-admin/firestore';
 import { convertCommonTimestamps } from '../../common/utils/date.utils';
 import axios from 'axios';
@@ -67,6 +71,8 @@ export class AuthService {
       interface UserData {
         email: string;
         displayName: string;
+        emailVerified: boolean;
+        phoneVerified: boolean;
         createdAt: ReturnType<typeof FieldValue.serverTimestamp>;
         updatedAt: ReturnType<typeof FieldValue.serverTimestamp>;
         phoneNumber?: string;
@@ -75,6 +81,8 @@ export class AuthService {
       const userData: UserData = {
         email: registerDto.email,
         displayName: registerDto.displayName,
+        emailVerified: false,
+        phoneVerified: false,
         createdAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       };
@@ -442,6 +450,166 @@ export class AuthService {
     } catch (error) {
       console.error('User search error:', error);
       throw new Error('Failed to search users');
+    }
+  }
+
+  /**
+   * Send email verification
+   */
+  async sendEmailVerification(uid: string): Promise<VerificationResponse> {
+    try {
+      // Get user's email from Firebase Auth
+      const userRecord = await this.firebaseService.auth.getUser(uid);
+
+      if (!userRecord.email) {
+        throw new Error('User does not have an email address');
+      }
+
+      // Generate email verification link
+      const link =
+        await this.firebaseService.auth.generateEmailVerificationLink(
+          userRecord.email,
+        );
+
+      // In production, you would send this link via email service
+      console.log(`Email verification link: ${link}`);
+
+      return {
+        success: true,
+        message: 'Email verification sent successfully',
+      };
+    } catch (error) {
+      console.error('Send email verification error:', error);
+      throw new Error('Failed to send email verification');
+    }
+  }
+
+  /**
+   * Verify email using OOB code
+   */
+  async verifyEmail(oobCode: string): Promise<EmailVerificationResponse> {
+    try {
+      // For Firebase Admin SDK, we need to use REST API for action codes
+      const response = await axios.post(
+        `${this.FIREBASE_AUTH_API}:update?key=${this.firebaseApiKey}`,
+        {
+          oobCode: oobCode,
+        },
+      );
+
+      const email = response.data.email;
+      if (!email) {
+        throw new Error('Invalid verification code');
+      }
+
+      // Get user by email and update both Firebase Auth and Firestore
+      const userRecord = await this.firebaseService.auth.getUserByEmail(email);
+
+      // Update Firebase Auth email verification status
+      await this.firebaseService.auth.updateUser(userRecord.uid, {
+        emailVerified: true,
+      });
+
+      // Update Firestore
+      await this.firebaseService.firestore
+        .collection('users')
+        .doc(userRecord.uid)
+        .update({
+          emailVerified: true,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+      return {
+        success: true,
+        message: 'Email verified successfully',
+        emailVerified: true,
+      };
+    } catch (error) {
+      console.error('Email verification error:', error);
+      throw new Error(
+        'Email verification failed. Code may be expired or invalid.',
+      );
+    }
+  }
+
+  /**
+   * Send forgot password email
+   */
+  async sendPasswordReset(email: string): Promise<VerificationResponse> {
+    try {
+      // Check if user exists
+      await this.firebaseService.auth.getUserByEmail(email);
+
+      // Generate password reset link
+      const link =
+        await this.firebaseService.auth.generatePasswordResetLink(email);
+
+      // In production, you would send this link via email service
+      console.log(`Password reset link: ${link}`);
+
+      return {
+        success: true,
+        message: 'Password reset email sent successfully',
+      };
+    } catch (error) {
+      if (error.code === 'auth/user-not-found') {
+        // Return success even if user not found for security reasons
+        return {
+          success: true,
+          message: 'If the email exists, a password reset link has been sent',
+        };
+      }
+      console.error('Send password reset error:', error);
+      throw new Error('Failed to send password reset email');
+    }
+  }
+
+  /**
+   * Reset password using OOB code
+   */
+  async resetPassword(
+    oobCode: string,
+    newPassword: string,
+  ): Promise<VerificationResponse> {
+    try {
+      // Use Firebase REST API to reset password
+      const response = await axios.post(
+        `${this.FIREBASE_AUTH_API}:resetPassword?key=${this.firebaseApiKey}`,
+        {
+          oobCode: oobCode,
+          newPassword: newPassword,
+        },
+      );
+
+      const email = response.data.email;
+      if (!email) {
+        throw new Error('Invalid password reset code');
+      }
+
+      // Update timestamp in Firestore
+      const userRecord = await this.firebaseService.auth.getUserByEmail(email);
+      await this.firebaseService.firestore
+        .collection('users')
+        .doc(userRecord.uid)
+        .update({
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+
+      return {
+        success: true,
+        message: 'Password reset successfully',
+      };
+    } catch (error) {
+      console.error('Password reset error:', error);
+      if (error.response?.data?.error?.message === 'EXPIRED_OOB_CODE') {
+        throw new Error(
+          'Password reset code has expired. Please request a new one.',
+        );
+      }
+      if (error.response?.data?.error?.message === 'INVALID_OOB_CODE') {
+        throw new Error('Invalid password reset code.');
+      }
+      throw new Error('Password reset failed');
     }
   }
 }
