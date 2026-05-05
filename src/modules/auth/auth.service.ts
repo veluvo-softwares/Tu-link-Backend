@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
+import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -35,6 +36,7 @@ export class AuthService {
   constructor(
     private firebaseService: FirebaseService,
     private configService: ConfigService,
+    private emailService: TuLinkResendEmailService,
   ) {
     this.firebaseApiKey =
       this.configService.get<string>('firebase.apiKey') || '';
@@ -113,6 +115,20 @@ export class AuthService {
         expiresIn: string;
       };
 
+      // Automatically send email verification after successful registration
+      try {
+        await this.sendEmailVerification(userRecord.uid);
+        console.log(
+          `Email verification automatically sent to ${registerDto.email}`,
+        );
+      } catch (emailError) {
+        console.warn(
+          `Failed to send automatic email verification to ${registerDto.email}:`,
+          emailError,
+        );
+        // Don't fail registration if email sending fails
+      }
+
       return {
         user: {
           uid: userRecord.uid,
@@ -175,6 +191,9 @@ export class AuthService {
           emailVerified?: boolean;
         };
 
+      // Get Firebase Auth user record (has the correct email verification status)
+      const firebaseUser = await this.firebaseService.auth.getUser(localId);
+
       // Get user data from Firestore
       const userDoc = await this.firebaseService.firestore
         .collection('users')
@@ -186,8 +205,31 @@ export class AuthService {
       }
 
       const userData = userDoc.data() as
-        | { displayName?: string; phoneNumber?: string }
+        | {
+            displayName?: string;
+            phoneNumber?: string;
+            emailVerified?: boolean;
+          }
         | undefined;
+
+      // Sync email verification status between Firebase Auth and Firestore
+      const authEmailVerified = firebaseUser.emailVerified;
+      const firestoreEmailVerified = userData?.emailVerified || false;
+
+      if (authEmailVerified !== firestoreEmailVerified) {
+        console.log(
+          `Syncing email verification status: Firebase Auth=${authEmailVerified}, Firestore=${firestoreEmailVerified}`,
+        );
+
+        // Update Firestore to match Firebase Auth
+        await this.firebaseService.firestore
+          .collection('users')
+          .doc(localId)
+          .update({
+            emailVerified: authEmailVerified,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+      }
 
       // Return the ID token and refresh token from Firebase
       return {
@@ -196,10 +238,7 @@ export class AuthService {
           email: email,
           displayName: userData?.displayName || '',
           phoneNumber: userData?.phoneNumber,
-
-          emailVerified:
-            (response.data as { emailVerified?: boolean }).emailVerified ||
-            false,
+          emailVerified: authEmailVerified, // Use Firebase Auth as source of truth
         },
         tokens: {
           idToken,
@@ -252,6 +291,9 @@ export class AuthService {
   }
 
   async getProfile(uid: string): Promise<User> {
+    // Get Firebase Auth user for accurate email verification status
+    const firebaseUser = await this.firebaseService.auth.getUser(uid);
+
     const userDoc = await this.firebaseService.firestore
       .collection('users')
       .doc(uid)
@@ -262,6 +304,25 @@ export class AuthService {
     }
 
     const userData = { id: userDoc.id, ...userDoc.data() } as User;
+
+    // Sync email verification status if needed
+    const authEmailVerified = firebaseUser.emailVerified;
+    const firestoreEmailVerified = userData.emailVerified || false;
+
+    if (authEmailVerified !== firestoreEmailVerified) {
+      console.log(
+        `Syncing profile email verification: Firebase Auth=${authEmailVerified}, Firestore=${firestoreEmailVerified}`,
+      );
+
+      // Update Firestore
+      await this.firebaseService.firestore.collection('users').doc(uid).update({
+        emailVerified: authEmailVerified,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Update local userData
+      userData.emailVerified = authEmailVerified;
+    }
 
     // Convert Firestore Timestamps to ISO 8601 strings
     return convertCommonTimestamps(
@@ -465,19 +526,49 @@ export class AuthService {
         throw new Error('User does not have an email address');
       }
 
-      // Generate email verification link
+      // Check if user is already verified
+      if (userRecord.emailVerified) {
+        return {
+          success: false,
+          message: 'Email address is already verified',
+        };
+      }
+
+      // Generate email verification link using Firebase
       const link =
         await this.firebaseService.auth.generateEmailVerificationLink(
           userRecord.email,
         );
 
-      // In production, you would send this link via email service
-      console.log(`Email verification link: ${link}`);
+      // Get user's display name from Firestore for personalized email
+      const userDoc = await this.firebaseService.firestore
+        .collection('users')
+        .doc(uid)
+        .get();
 
-      return {
-        success: true,
-        message: 'Email verification sent successfully',
-      };
+      const userData = userDoc.data();
+      const displayName = userData?.displayName || userRecord.displayName;
+
+      // Send email using our email service
+      const emailSent = await this.emailService.sendVerificationEmail(
+        userRecord.email,
+        displayName,
+        link,
+      );
+
+      if (emailSent) {
+        return {
+          success: true,
+          message: 'Email verification sent successfully',
+        };
+      } else {
+        // Fallback: log the link if email service fails
+        console.log(`Email service failed. Verification link: ${link}`);
+        return {
+          success: true,
+          message: 'Email verification initiated (check server logs for link)',
+        };
+      }
     } catch (error) {
       console.error('Send email verification error:', error);
       throw new Error('Failed to send email verification');
@@ -538,19 +629,41 @@ export class AuthService {
   async sendPasswordReset(email: string): Promise<VerificationResponse> {
     try {
       // Check if user exists
-      await this.firebaseService.auth.getUserByEmail(email);
+      const userRecord = await this.firebaseService.auth.getUserByEmail(email);
 
       // Generate password reset link
       const link =
         await this.firebaseService.auth.generatePasswordResetLink(email);
 
-      // In production, you would send this link via email service
-      console.log(`Password reset link: ${link}`);
+      // Get user's display name from Firestore for personalized email
+      const userDoc = await this.firebaseService.firestore
+        .collection('users')
+        .doc(userRecord.uid)
+        .get();
 
-      return {
-        success: true,
-        message: 'Password reset email sent successfully',
-      };
+      const userData = userDoc.data();
+      const displayName = userData?.displayName || userRecord.displayName;
+
+      // Send branded password reset email
+      const emailSent = await this.emailService.sendPasswordResetEmail(
+        email,
+        displayName,
+        link,
+      );
+
+      if (emailSent) {
+        return {
+          success: true,
+          message: 'Password reset email sent successfully',
+        };
+      } else {
+        // Fallback: log the link if email service fails
+        console.log(`Email service failed. Password reset link: ${link}`);
+        return {
+          success: true,
+          message: 'Password reset initiated (check server logs for link)',
+        };
+      }
     } catch (error) {
       if (error.code === 'auth/user-not-found') {
         // Return success even if user not found for security reasons
