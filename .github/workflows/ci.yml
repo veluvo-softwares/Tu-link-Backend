@@ -179,7 +179,7 @@ jobs:
             cd /opt/tulink-backend
             
             # Create backup of current deployment
-            sudo cp config/docker/docker-compose.dev.yml config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S)
+            cp config/docker/docker-compose.dev.yml config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S)
             
             # Pull latest changes
             git fetch origin
@@ -191,20 +191,32 @@ jobs:
             # Start containers with latest code (rebuild with new changes)
             docker compose -f config/docker/docker-compose.dev.yml up -d --build
             
-            # Wait for health check
-            echo "Waiting for application to be healthy..."
-            for i in {1..30}; do
-              if curl -f http://localhost:3000/health > /dev/null 2>&1; then
+            # Wait for deployment to complete and containers to be ready
+            echo "Waiting for deployment to complete..."
+            sleep 15
+            
+            # Check if containers are running
+            if ! docker compose -f config/docker/docker-compose.dev.yml ps --services --filter "status=running" | grep -q "api-dev"; then
+              echo "API container failed to start, checking logs..."
+              docker compose -f config/docker/docker-compose.dev.yml logs api-dev
+              exit 1
+            fi
+            
+            # Wait for application to be ready and healthy
+            echo "Testing application endpoint..."
+            for i in {1..5}; do
+              if curl -f -s http://localhost:3000/health > /dev/null 2>&1; then
                 echo "Application is healthy!"
                 break
               fi
-              if [ $i -eq 30 ]; then
-                echo "Health check failed after 30 attempts, rolling back..."
-                docker compose -f config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S) up -d
+              if [ $i -eq 5 ]; then
+                echo "Health check failed after 5 attempts"
+                echo "Deployment may still be in progress - check server logs"
+                docker compose -f config/docker/docker-compose.dev.yml logs api-dev
                 exit 1
               fi
-              echo "Attempt $i/30: Application not ready yet, waiting..."
-              sleep 10
+              echo "Health check attempt $i/5 failed, retrying in 15s..."
+              sleep 15
             done
             
             # Cleanup old images
@@ -218,10 +230,24 @@ jobs:
 
       - name: Verify deployment
         run: |
-          # Additional verification
+          # Additional verification from external access
           sleep 30
-          curl -f http://${{ secrets.DROPLET_HOST }}/health || exit 1
-          echo "Deployment verification successful!"
+          
+          # Test health endpoint from external access
+          if curl -f -s http://${{ secrets.DROPLET_HOST }}:3000/health; then
+            echo "✅ External health check successful!"
+          else
+            echo "❌ External health check failed!"
+            echo "Checking if service is accessible..."
+            ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
+              cd /opt/tulink-backend
+              docker compose -f config/docker/docker-compose.dev.yml ps
+              docker compose -f config/docker/docker-compose.dev.yml logs --tail=50 api-dev
+            EOF
+            exit 1
+          fi
+          
+          echo "🎉 Deployment verification successful!"
 
       - name: Notify deployment status
         if: always()

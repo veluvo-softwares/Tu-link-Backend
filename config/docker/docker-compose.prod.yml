@@ -1,48 +1,45 @@
 services:
-  # Tu-Link Backend Application - Development (replaces api-dev nginx)
-  api-dev:
+  # Tu-Link Backend Application - Production
+  api:
     build:
       context: ../../
       dockerfile: config/docker/Dockerfile
-      target: development
-    container_name: api-dev
+      target: production
+    container_name: tulink-api-prod
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - PORT=3000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     env_file:
       - ../../.env
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     depends_on:
       redis:
         condition: service_healthy
     networks:
       - tulink-network
+      - web
     restart: unless-stopped
     volumes:
-      - ../../src:/usr/src/app/src:ro
       - ../../logs:/usr/src/app/logs
-    command: npm run start:dev
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      test: ["CMD", "node", "-e", "const http=require('http');http.get('http://localhost:3000/health',(res)=>{process.exit(res.statusCode===200?0:1)}).on('error',()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 40s
 
-  # Redis Cache Database - Development
+  # Redis Cache Database - Production
   redis:
     image: redis:7-alpine
-    container_name: tulink-redis-dev
+    container_name: tulink-redis-prod
     expose:
       - "6379"
-    ports:
-      - "6380:6379"
     volumes:
-      - redis_dev_data:/data
-    command: redis-server --appendonly yes --save "" --stop-writes-on-bgsave-error no
+      - redis_prod_data:/data
+    command: redis-server --appendonly yes --save 900 1 --save 300 10 --save 60 10000
     healthcheck:
       test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
@@ -55,7 +52,10 @@ services:
 networks:
   tulink-network:
     driver: bridge
+    internal: true
+  web:
+    external: true
 
 volumes:
-  redis_dev_data:
+  redis_prod_data:
     driver: local
