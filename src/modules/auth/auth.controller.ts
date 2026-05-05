@@ -39,6 +39,8 @@ export class AuthController {
 
 **Phone Number Format:** Must be in E.164 format (e.g., +254712345678, +1234567890)
 
+**Email Verification:** A verification email is automatically sent to the user's email address after successful registration.
+
 **Returns:**
 - User profile data
 - Firebase ID token (valid for 1 hour)
@@ -251,13 +253,22 @@ export class AuthController {
     
 **Important Notes:**
 - User must be authenticated
+- Returns error if email is already verified
 - Email verification link is sent to the user's registered email
 - Link expires after 1 hour
-- Can be called multiple times if needed`,
+- Can be called multiple times if needed (for unverified emails)`,
   })
   @ApiResponse({
     status: 200,
-    description: 'Email verification sent successfully',
+    description:
+      'Email verification sent successfully or email already verified',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+      },
+    },
   })
   @ApiResponse({
     status: 401,
