@@ -16,6 +16,7 @@ export interface Participant {
   invitedBy: string;
   lastSeenAt?: Timestamp;
   connectionStatus: ConnectionStatus;
+  displayName?: string;
   deviceInfo?: {
     platform: string;
     appVersion: string;
