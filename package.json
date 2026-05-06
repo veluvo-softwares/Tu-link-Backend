@@ -6,7 +6,8 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "docker:dev": "docker compose -f config/docker/docker-compose.dev.yml up -d --build",
+    "docker:dev": "docker compose -f config/docker/docker-compose.dev.yml --profile local up -d --build",
+    "docker:server":"docker-compose -f config/docker/docker-compose.dev.yml --profile local up -d",
     "docker:down": "docker compose -f config/docker/docker-compose.dev.yml down",
     "deploy": "./deploy.sh",
     "build": "nest build",
