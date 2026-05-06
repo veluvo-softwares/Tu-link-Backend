@@ -121,10 +121,37 @@ export class ParticipantService {
       .collection('participants')
       .get();
 
-    return snapshot.docs.map((doc) => ({
+    const participants = snapshot.docs.map((doc) => ({
       id: doc.id,
       ...doc.data(),
     })) as Participant[];
+
+    // Fetch user details for each participant to include displayName
+    const enrichedParticipants = await Promise.all(
+      participants.map(async (participant) => {
+        try {
+          const userDoc = await this.firebaseService.firestore
+            .collection('users')
+            .doc(participant.userId)
+            .get();
+
+          const userData = userDoc.data();
+          return {
+            ...participant,
+            displayName: (userData?.displayName as string) || 'Unknown User',
+          };
+        } catch (error) {
+          // If user fetch fails, return participant with fallback displayName
+          console.error(`Failed to fetch user ${participant.userId}:`, error);
+          return {
+            ...participant,
+            displayName: 'Unknown User',
+          };
+        }
+      }),
+    );
+
+    return enrichedParticipants;
   }
 
   async isParticipant(journeyId: string, userId: string): Promise<boolean> {
