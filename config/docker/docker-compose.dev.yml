@@ -22,8 +22,45 @@ services:
         condition: service_healthy
     networks:
       - tulink-network
-      - web # Comment out for local development
+      - web
     restart: unless-stopped
+    profiles:
+      - server
+    volumes:
+      - ../../src:/usr/src/app/src:ro
+      - ../../logs:/usr/src/app/logs
+    command: npm run start:dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+      
+  # Local development version of api-dev without server networks
+  api-dev-local:
+    build:
+      context: ../../
+      dockerfile: config/docker/Dockerfile
+      target: development
+    container_name: api-dev-local
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    env_file:
+      - ../../.env
+    ports:
+      - "3001:3000"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - default
+    restart: unless-stopped
+    profiles:
+      - local
     volumes:
       - ../../src:/usr/src/app/src:ro
       - ../../logs:/usr/src/app/logs
@@ -58,8 +95,8 @@ services:
 networks:
   tulink-network:
     driver: bridge
-    internal: true  # Comment out on local to allow port access for local development
-  web:  # Comment out on local to allow port access for local development
+    internal: false
+  web:
     external: true
 
 volumes:
