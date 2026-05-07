@@ -55,7 +55,7 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - tulink-network
+      - local-dev
     restart: unless-stopped
     profiles:
       - local
@@ -87,7 +87,8 @@ services:
       timeout: 3s
       retries: 3
     networks:
-      - tulink-network
+      - tulink-network  # Server profile
+      - local-dev       # Local profile
     restart: unless-stopped
 
 networks:
@@ -96,6 +97,9 @@ networks:
     internal: false
   web:
     external: true
+  local-dev:
+    driver: bridge
+    internal: false
 
 volumes:
   redis_dev_data:

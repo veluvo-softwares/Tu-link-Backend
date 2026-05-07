@@ -18,7 +18,6 @@ export interface LagAlert {
   id: string;
   journeyId: string;
   participantId: string;
-  userId: string;
   distanceFromLeader: number;
   leaderLocation: GeoPoint;
   followerLocation: GeoPoint;

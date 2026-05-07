@@ -72,4 +72,51 @@ export class FirebaseService implements OnModuleInit {
   async clearJourneyPositions(journeyId: string): Promise<void> {
     await this.rtdb.ref(`journeys/${journeyId}`).remove();
   }
+
+  /**
+   * Read all member positions for a journey from RTDB.
+   * Returns real-time location data for all participants.
+   */
+  async getJourneyRTDBSnapshot(
+    journeyId: string,
+  ): Promise<Record<string, Record<string, unknown>> | null> {
+    try {
+      const snapshot = await this.rtdb
+        .ref(`journeys/${journeyId}/members`)
+        .once('value');
+      return snapshot.exists()
+        ? (snapshot.val() as Record<string, Record<string, unknown>>)
+        : null;
+    } catch (error) {
+      console.error(
+        `Failed to read RTDB snapshot for journey ${journeyId}:`,
+        error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Read a specific member's position from RTDB.
+   * Returns real-time location data for a single participant.
+   */
+  async getMemberRTDBSnapshot(
+    journeyId: string,
+    userId: string,
+  ): Promise<Record<string, unknown> | null> {
+    try {
+      const snapshot = await this.rtdb
+        .ref(`journeys/${journeyId}/members/${userId}`)
+        .once('value');
+      return snapshot.exists()
+        ? (snapshot.val() as Record<string, unknown>)
+        : null;
+    } catch (error) {
+      console.error(
+        `Failed to read RTDB snapshot for user ${userId} in journey ${journeyId}:`,
+        error,
+      );
+      return null;
+    }
+  }
 }

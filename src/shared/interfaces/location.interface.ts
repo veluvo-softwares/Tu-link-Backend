@@ -23,7 +23,6 @@ export interface LocationHistory {
 export interface LocationUpdate {
   journeyId: string;
   participantId: string;
-  userId: string;
   location: {
     latitude: number;
     longitude: number;
@@ -45,7 +44,6 @@ export interface LocationUpdate {
 export interface CachedLocation {
   journeyId: string;
   participantId: string;
-  userId: string;
   location: {
     latitude: number;
     longitude: number;
@@ -74,7 +72,7 @@ export interface LocationHistoryResponse {
 }
 
 export interface LatestLocationsResponse {
-  locations: Record<string, LocationUpdate>;
+  participants: Record<string, LocationUpdate>;
   destination?: {
     latitude: number;
     longitude: number;
