@@ -1,3 +1,4 @@
+
 services:
   # Tu-Link Backend Application - Development (replaces api-dev nginx)
   api-dev:
@@ -55,6 +56,7 @@ services:
       redis:
         condition: service_healthy
     networks:
+      - tulink-network
       - tulink-network
     restart: unless-stopped
     profiles:
