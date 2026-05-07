@@ -26,6 +26,32 @@ import {
 import { Priority } from '../../types/priority.type';
 import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
+interface RTDBLocationData {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+  heading?: number | null;
+  speed?: number | null;
+  altitude?: number | null;
+  timestamp: number;
+  userId: string;
+  sequenceNumber?: number;
+  priority?: string;
+  metadata?: {
+    batteryLevel?: number | null;
+    isMoving?: boolean | null;
+    statusChange?: boolean | string | null;
+  };
+}
+
+interface Journey {
+  destination?: {
+    latitude: number;
+    longitude: number;
+  };
+  destinationAddress?: string;
+}
+
 @Injectable()
 export class LocationService {
   constructor(
@@ -136,7 +162,6 @@ export class LocationService {
     const locationUpdate: LocationUpdate = {
       ...locationUpdateDto,
       participantId: participant.id,
-      userId,
       sequenceNumber,
       priority,
       timestamp: Date.now(),
@@ -237,7 +262,6 @@ export class LocationService {
     const locationData = {
       journeyId: update.journeyId,
       participantId: update.participantId,
-      userId: update.userId,
       location: new GeoPoint(
         update.location.latitude,
         update.location.longitude,
@@ -352,10 +376,41 @@ export class LocationService {
 
     // Get journey details for destination information
     const journey = await this.journeyService.findById(journeyId);
+    let locations: Record<string, LocationUpdate> = {};
 
+    // Strategy 1: Try RTDB first (most recent real-time data)
+    try {
+      const rtdbData =
+        await this.firebaseService.getJourneyRTDBSnapshot(journeyId);
+      if (rtdbData && Object.keys(rtdbData).length > 0) {
+        console.log(
+          `RTDB: Found ${Object.keys(rtdbData).length} real-time locations for journey ${journeyId}`,
+        );
+        locations = await this.transformRTDBToLocationUpdates(
+          journeyId,
+          rtdbData,
+        );
+
+        // If we got RTDB data, use it and skip Redis fallback
+        if (Object.keys(locations).length > 0) {
+          return this.buildLatestLocationsResponse(locations, journey);
+        }
+      } else {
+        console.log(
+          `RTDB: No active participants found for journey ${journeyId}`,
+        );
+      }
+    } catch (error) {
+      console.error(
+        `RTDB read failed for journey ${journeyId}, falling back to Redis:`,
+        error,
+      );
+    }
+
+    // Strategy 2: Fallback to Redis cache (existing behavior)
+    console.log(`Falling back to Redis cache for journey ${journeyId}`);
     const participants =
       await this.redisService.getJourneyParticipants(journeyId);
-    const locations: Record<string, LocationUpdate> = {};
 
     for (const participantId of participants) {
       const location = await this.redisService.getCachedLocation(
@@ -367,13 +422,22 @@ export class LocationService {
       }
     }
 
-    // Prepare response with destination coordinates
+    return this.buildLatestLocationsResponse(locations, journey);
+  }
+
+  /**
+   * Build the final response object with participants and journey details
+   */
+  private buildLatestLocationsResponse(
+    participants: Record<string, LocationUpdate>,
+    journey: Journey,
+  ): LatestLocationsResponse {
     const response: {
-      locations: Record<string, LocationUpdate>;
+      participants: Record<string, LocationUpdate>;
       destination?: { latitude: number; longitude: number };
       destinationAddress?: string;
     } = {
-      locations,
+      participants,
     };
 
     if (journey.destination) {
@@ -542,5 +606,57 @@ export class LocationService {
       id: snapshot.docs[0].id,
       ...data,
     } as LocationHistory;
+  }
+
+  /**
+   * Transform RTDB data structure to LocationUpdate format
+   * RTDB format: { userId: { lat, lng, accuracy, heading, speed, timestamp, ... } }
+   * API format: { participantId: LocationUpdate }
+   */
+  private async transformRTDBToLocationUpdates(
+    journeyId: string,
+    rtdbData: Record<string, Record<string, unknown>>,
+  ): Promise<Record<string, LocationUpdate>> {
+    const locations: Record<string, LocationUpdate> = {};
+
+    // Get participants to map userId to participantId
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
+    const userToParticipantMap = new Map<string, string>();
+    participants.forEach((p) => userToParticipantMap.set(p.userId, p.id));
+
+    for (const [userId, data] of Object.entries(rtdbData)) {
+      const participantId = userToParticipantMap.get(userId);
+      if (!participantId || !data) continue;
+
+      // Cast to our expected interface for type safety
+      const locationData = data as unknown as RTDBLocationData;
+
+      locations[participantId] = {
+        journeyId,
+        participantId,
+        location: {
+          latitude: locationData.lat,
+          longitude: locationData.lng,
+        },
+        accuracy: locationData.accuracy || 0,
+        heading: locationData.heading || null,
+        speed: locationData.speed || null,
+        altitude: locationData.altitude || null,
+        timestamp: locationData.timestamp,
+        sequenceNumber: locationData.sequenceNumber || 0,
+        priority: locationData.priority || 'LOW',
+        metadata: {
+          batteryLevel: locationData.metadata?.batteryLevel || null,
+          isMoving: locationData.metadata?.isMoving || null,
+          statusChange:
+            typeof locationData.metadata?.statusChange === 'string'
+              ? locationData.metadata?.statusChange === 'true'
+              : locationData.metadata?.statusChange || false,
+        },
+      } as LocationUpdate;
+    }
+
+    return locations;
   }
 }
