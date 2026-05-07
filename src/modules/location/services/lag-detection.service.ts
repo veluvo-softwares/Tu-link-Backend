@@ -21,7 +21,6 @@ import {
 interface LagAlertData {
   journeyId: string;
   participantId: string;
-  userId: string;
   distanceFromLeader: number;
   leaderLocation: GeoPoint;
   followerLocation: GeoPoint;
@@ -78,7 +77,6 @@ export class LagDetectionService {
       return await this.createLagAlert({
         journeyId: journey.id,
         participantId: followerUpdate.participantId,
-        userId: followerUpdate.userId,
         distanceFromLeader: distance,
         leaderLocation: new GeoPoint(
           leaderLocation.location.latitude,
@@ -113,7 +111,6 @@ export class LagDetectionService {
   private async createLagAlert(data: {
     journeyId: string;
     participantId: string;
-    userId: string;
     distanceFromLeader: number;
     leaderLocation: GeoPoint;
     followerLocation: GeoPoint;
@@ -128,7 +125,6 @@ export class LagDetectionService {
     const alertData: LagAlertData = {
       journeyId: data.journeyId,
       participantId: data.participantId,
-      userId: data.userId,
       distanceFromLeader: data.distanceFromLeader,
       leaderLocation: data.leaderLocation,
       followerLocation: data.followerLocation,
