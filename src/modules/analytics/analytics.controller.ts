@@ -24,6 +24,29 @@ export class AnalyticsController {
   }
 
   /**
+   * Get journey summary for the post-trip screen.
+   * Returns pre-calculated analytics if available, otherwise triggers
+   * calculation on demand.
+   */
+  @Get('journeys/:id/summary')
+  async getJourneySummary(@Param('id') id: string) {
+    // Try pre-calculated analytics first
+    let analytics = await this.analyticsService.getJourneyAnalytics(id);
+
+    // If not yet calculated (e.g. older journeys), calculate now
+    if (!analytics) {
+      try {
+        analytics = await this.analyticsService.calculateJourneyAnalytics(id);
+      } catch {
+        // Journey may not have location data — return null gracefully
+        return null;
+      }
+    }
+
+    return analytics;
+  }
+
+  /**
    * Get user's journey history with analytics
    */
   @Get('user')
