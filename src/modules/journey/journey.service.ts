@@ -251,6 +251,25 @@ export class JourneyService {
       throw new BadRequestException('Journey is not active');
     }
 
+    return this.completeJourney(journeyId);
+  }
+
+  /**
+   * Called automatically when all participants have arrived at the destination.
+   * Skips the leader/status guards since arrival detection already verified state.
+   */
+  async autoCompleteJourney(journeyId: string): Promise<Journey> {
+    const journey = await this.findById(journeyId);
+
+    // Guard: only act on still-active journeys (avoids double-complete race)
+    if (journey.status !== 'ACTIVE') {
+      return journey;
+    }
+
+    return this.completeJourney(journeyId);
+  }
+
+  private async completeJourney(journeyId: string): Promise<Journey> {
     await this.firebaseService.firestore
       .collection('journeys')
       .doc(journeyId)
@@ -282,18 +301,13 @@ export class JourneyService {
         );
     }, cleanupDelayMs);
 
-    // Remove from active journeys in Redis
     await this.redisService.removeActiveJourney(journeyId);
 
-    // Clean up all Redis keys for this journey
-    // Participant keys must be cleared before clearJourneyCache() removes the
-    // participant set, so read the set first.
     const cachedParticipantIds =
       await this.redisService.getJourneyParticipants(journeyId);
 
     await this.redisService.clearJourneyCache(journeyId);
 
-    // Clear per-participant connection state
     const redisClient = this.redisService.getClient();
     for (const participantId of cachedParticipantIds) {
       await redisClient.del(
@@ -304,29 +318,31 @@ export class JourneyService {
       );
     }
 
-    // Clear WebSocket room key
     await redisClient.del(`ws:room:${journeyId}`);
-
-    // Clear journey metrics cache
     await redisClient.del(`journey_metrics:${journeyId}`);
 
     console.log(`✅ Redis keys cleared for journey ${journeyId}`);
 
-    // Get all active participants and send journey ended notifications
     const participants =
       await this.participantService.getJourneyParticipants(journeyId);
-    const activeParticipants = participants.filter(
-      (p) => p.status === 'ACTIVE' || p.role === 'LEADER',
-    );
-    const participantIds = activeParticipants.map((p) => p.userId);
+    const notifyIds = participants
+      .filter(
+        (p) =>
+          p.status === 'ACTIVE' ||
+          p.status === 'ARRIVED' ||
+          p.role === 'LEADER',
+      )
+      .map((p) => p.userId);
+
+    const journey = await this.findById(journeyId);
 
     await this.notificationService.sendJourneyEnded(
       journeyId,
       journey.name,
-      participantIds,
+      notifyIds,
     );
 
-    return this.findById(journeyId);
+    return journey;
   }
 
   async inviteParticipant(

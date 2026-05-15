@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JourneyController } from './journey.controller';
 import { JourneyService } from './journey.service';
@@ -8,6 +8,7 @@ import { FirebaseModule } from '../../shared/firebase/firebase.module';
 import { RedisModule } from '../../shared/redis/redis.module';
 import { NotificationModule } from '../notification/notification.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
+import { LocationModule } from '../location/location.module';
 import appConfig from '../../config/app.config';
 
 @Module({
@@ -17,6 +18,7 @@ import appConfig from '../../config/app.config';
     RedisModule,
     NotificationModule,
     AnalyticsModule,
+    forwardRef(() => LocationModule),
   ],
   controllers: [JourneyController],
   providers: [JourneyService, ParticipantService, JourneyMetricsService],

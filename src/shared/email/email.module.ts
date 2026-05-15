@@ -5,10 +5,10 @@ import { TuLinkResendEmailService } from './tulink-resend-email.service';
 @Module({
   imports: [ConfigModule],
   providers: [
-    TuLinkResendEmailService, // TuLink-branded email service (primary)
+    TuLinkResendEmailService,
     {
-      provide: 'EMAIL_SERVICE', // Use TuLink service as the primary email service
-      useClass: TuLinkResendEmailService,
+      provide: 'EMAIL_SERVICE',
+      useExisting: TuLinkResendEmailService,
     },
   ],
   exports: [TuLinkResendEmailService, 'EMAIL_SERVICE'],
