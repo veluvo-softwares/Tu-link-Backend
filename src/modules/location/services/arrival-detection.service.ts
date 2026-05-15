@@ -9,7 +9,17 @@ import { FieldValue, DocumentSnapshot } from 'firebase-admin/firestore';
 
 interface ParticipantData {
   status: string;
+  role: string;
+  userId: string;
   [key: string]: unknown;
+}
+
+export interface ArrivalResult {
+  arrived: boolean;
+  alreadyArrived: boolean;
+  arrivedCount: number;
+  totalCount: number;
+  allArrived: boolean;
 }
 
 @Injectable()
@@ -20,15 +30,20 @@ export class ArrivalDetectionService {
     private configService: ConfigService,
   ) {}
 
-  /**
-   * Detect if a participant has arrived at the destination
-   */
   async detectArrival(
     update: LocationUpdate,
     journey: Journey,
-  ): Promise<boolean> {
+  ): Promise<ArrivalResult> {
+    const noArrival: ArrivalResult = {
+      arrived: false,
+      alreadyArrived: false,
+      arrivedCount: 0,
+      totalCount: 0,
+      allArrived: false,
+    };
+
     if (!journey.destination) {
-      return false;
+      return noArrival;
     }
 
     const destinationCoords = {
@@ -47,28 +62,39 @@ export class ArrivalDetectionService {
     const speedThreshold =
       this.configService.get<number>('app.arrivalSpeedThresholdMps') ?? 1.39;
 
-    // Consider arrived if:
-    // 1. Within distance threshold (default 100 meters)
-    // 2. Speed is low (< 5 km/h = 1.39 m/s) or speed not available
     const isWithinDistance = distanceToDestination < distanceThreshold;
     const isLowSpeed = !update.speed || update.speed < speedThreshold;
 
-    if (isWithinDistance && isLowSpeed) {
-      await this.markParticipantArrived(update.participantId, journey.id);
-      return true;
+    if (!isWithinDistance || !isLowSpeed) {
+      return noArrival;
     }
 
-    return false;
+    const markResult = await this.markParticipantArrived(
+      update.participantId,
+      journey.id,
+    );
+
+    if (markResult.alreadyArrived) {
+      return { ...noArrival, alreadyArrived: true };
+    }
+
+    const { arrivedCount, totalCount } = await this.getArrivalCounts(
+      journey.id,
+    );
+
+    return {
+      arrived: true,
+      alreadyArrived: false,
+      arrivedCount,
+      totalCount,
+      allArrived: arrivedCount >= totalCount && totalCount > 0,
+    };
   }
 
-  /**
-   * Mark a participant as arrived
-   */
   private async markParticipantArrived(
     participantId: string,
     journeyId: string,
-  ): Promise<void> {
-    // Check if already marked as arrived
+  ): Promise<{ alreadyArrived: boolean }> {
     const participantDoc = await this.firebaseService.firestore
       .collection('journeys')
       .doc(journeyId)
@@ -77,24 +103,45 @@ export class ArrivalDetectionService {
       .get();
 
     if (!participantDoc.exists) {
-      return;
+      return { alreadyArrived: false };
     }
 
     const participant = participantDoc.data() as ParticipantData | undefined;
-    if (participant && participant.status === 'ARRIVED') {
-      return; // Already marked as arrived
+    if (participant?.status === 'ARRIVED') {
+      return { alreadyArrived: true };
     }
 
-    // Update participant status to ARRIVED
     await participantDoc.ref.update({
       status: 'ARRIVED',
-      leftAt: FieldValue.serverTimestamp(),
+      arrivedAt: FieldValue.serverTimestamp(),
     });
+
+    return { alreadyArrived: false };
   }
 
   /**
-   * Get all participants who have arrived
+   * Returns how many active participants have arrived vs total active participants.
+   * Leader is included — they must also arrive or manually end for allArrived to be true.
    */
+  async getArrivalCounts(
+    journeyId: string,
+  ): Promise<{ arrivedCount: number; totalCount: number }> {
+    const snapshot = await this.firebaseService.firestore
+      .collection('journeys')
+      .doc(journeyId)
+      .collection('participants')
+      .where('status', 'in', ['ACTIVE', 'ACCEPTED', 'ARRIVED'])
+      .get();
+
+    const docs = snapshot.docs.map(
+      (d: DocumentSnapshot) => d.data() as ParticipantData,
+    );
+    const arrivedCount = docs.filter((p) => p.status === 'ARRIVED').length;
+    const totalCount = docs.length;
+
+    return { arrivedCount, totalCount };
+  }
+
   async getArrivedParticipants(journeyId: string): Promise<string[]> {
     const snapshot = await this.firebaseService.firestore
       .collection('journeys')
@@ -106,17 +153,8 @@ export class ArrivalDetectionService {
     return snapshot.docs.map((doc: DocumentSnapshot) => doc.id);
   }
 
-  /**
-   * Check if all participants have arrived
-   */
   async allParticipantsArrived(journeyId: string): Promise<boolean> {
-    const participantsSnapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .where('status', 'in', ['ACTIVE', 'ACCEPTED'])
-      .get();
-
-    return participantsSnapshot.empty;
+    const { arrivedCount, totalCount } = await this.getArrivalCounts(journeyId);
+    return totalCount > 0 && arrivedCount >= totalCount;
   }
 }
