@@ -8,6 +8,8 @@ import { SequenceService } from './services/sequence.service';
 import { AcknowledgmentService } from './services/acknowledgment.service';
 import { LagDetectionService } from './services/lag-detection.service';
 import { ArrivalDetectionService } from './services/arrival-detection.service';
+import { LocationBatchingService } from './services/location-batching.service';
+import { WebSocketMetricsService } from './services/websocket-metrics.service';
 import { FirebaseModule } from '../../shared/firebase/firebase.module';
 import { RedisModule } from '../../shared/redis/redis.module';
 import { JourneyModule } from '../journey/journey.module';
@@ -31,6 +33,8 @@ import appConfig from '../../config/app.config';
     AcknowledgmentService,
     LagDetectionService,
     ArrivalDetectionService,
+    LocationBatchingService,
+    WebSocketMetricsService,
   ],
   exports: [LocationService, LocationGateway],
 })

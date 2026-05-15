@@ -659,4 +659,76 @@ export class LocationService {
 
     return locations;
   }
+
+  /**
+   * Get locations updated since a specific timestamp (for polling strategy)
+   */
+  async getLocationsSince(
+    journeyId: string,
+    sinceTimestamp: number,
+    userId: string,
+  ): Promise<LatestLocationsResponse> {
+    try {
+      // Verify user is a participant
+      const isParticipant = await this.participantService.isParticipant(
+        journeyId,
+        userId,
+      );
+      if (!isParticipant) {
+        throw new ForbiddenException(
+          'User is not a participant in this journey',
+        );
+      }
+
+      // Get journey destination info
+      const journey = await this.journeyService.findById(journeyId);
+
+      // Try RTDB first
+      const rtdbLocations = await this.firebaseService.getLocationsSince(
+        journeyId,
+        sinceTimestamp,
+      );
+
+      if (Object.keys(rtdbLocations).length > 0) {
+        // Transform RTDB data to LocationUpdate format
+        const locations = await this.transformRTDBToLocationUpdates(
+          journeyId,
+          rtdbLocations,
+        );
+
+        return {
+          participants: locations,
+          destination: journey?.destination
+            ? {
+                latitude: journey.destination.latitude,
+                longitude: journey.destination.longitude,
+              }
+            : undefined,
+          destinationAddress: journey?.destinationAddress,
+        };
+      }
+
+      // Fallback to Redis if RTDB is empty
+      const redisLocations = await this.getLatestLocations(journeyId, userId);
+
+      // Filter Redis locations by timestamp
+      const filteredParticipants: Record<string, LocationUpdate> = {};
+      for (const [participantId, location] of Object.entries(
+        redisLocations.participants,
+      )) {
+        if (location.timestamp > sinceTimestamp) {
+          filteredParticipants[participantId] = location;
+        }
+      }
+
+      return {
+        participants: filteredParticipants,
+        destination: redisLocations.destination,
+        destinationAddress: redisLocations.destinationAddress,
+      };
+    } catch (error) {
+      console.error('Error getting locations since timestamp:', error);
+      throw error;
+    }
+  }
 }

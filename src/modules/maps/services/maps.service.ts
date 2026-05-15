@@ -10,6 +10,7 @@ import { DistanceUtils } from '../../../common/utils/distance.utils';
 import {
   PlaceResult,
   ReverseGeocodeResult,
+  RouteResult,
 } from '../interfaces/place-result.interface';
 
 interface RouteInfo {
@@ -335,5 +336,99 @@ export class MapsService {
   ): Promise<number | null> {
     const result = await this.calculateRouteDistance(from, to);
     return result ? result.duration : null;
+  }
+
+  /**
+   * Get a road-following route from Mapbox Directions API.
+   * Uses driving-traffic profile for traffic-aware routing.
+   * Result is cached in Redis for 5 minutes.
+   * Returns null on API error or no route found — never caches null.
+   */
+  async getRoute(
+    originLat: number,
+    originLng: number,
+    destLat: number,
+    destLng: number,
+  ): Promise<RouteResult | null> {
+    // Cache key: 2dp origin (moving driver), 4dp dest (fixed)
+    const cacheKey =
+      `maps:route:${originLat.toFixed(2)}:${originLng.toFixed(2)}` +
+      `:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
+
+    const redisClient = this.redisService.getClient();
+    const cached = await redisClient.get(cacheKey);
+
+    if (cached) {
+      this.logger.debug(`[Maps] Route cache hit: ${cacheKey}`);
+      return JSON.parse(cached) as RouteResult;
+    }
+
+    this.logger.debug(`[Maps] Route cache miss — calling Mapbox: ${cacheKey}`);
+
+    const token = this.configService.getOrThrow<string>('maps.mapboxToken');
+
+    // Mapbox Directions API: coordinates are lng,lat order
+    const url =
+      `https://api.mapbox.com/directions/v5/mapbox/driving-traffic/` +
+      `${originLng},${originLat};${destLng},${destLat}` +
+      `?geometries=geojson&overview=full&steps=true` +
+      `&access_token=${token}`;
+
+    try {
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        const body = await response.text();
+        this.logger.error(
+          `Mapbox Directions API error: ${response.status} — ${body}`,
+        );
+        return null; // Do not cache errors
+      }
+
+      const data = (await response.json()) as {
+        routes?: Array<{
+          distance: number;
+          duration: number;
+          geometry: { coordinates: number[][] };
+          legs: Array<{
+            steps: Array<{
+              distance: number;
+              maneuver: { instruction: string; type: string };
+            }>;
+          }>;
+        }>;
+      };
+
+      if (!data.routes?.length) {
+        this.logger.warn(
+          `[Maps] No routes returned from Mapbox for: ${cacheKey}`,
+        );
+        return null; // Do not cache empty result
+      }
+
+      const route = data.routes[0];
+      const result: RouteResult = {
+        coordinates: route.geometry.coordinates, // already [[lng,lat],...]
+        distanceMetres: route.distance,
+        durationSeconds: route.duration,
+        steps: (route.legs[0]?.steps ?? []).map((step) => ({
+          instruction: step.maneuver.instruction,
+          distanceMetres: step.distance,
+          maneuver: step.maneuver.type,
+        })),
+      };
+
+      // Cache for 5 minutes — traffic updates but roads don't change
+      await redisClient.setex(cacheKey, 300, JSON.stringify(result));
+      this.logger.debug(
+        `[Maps] Route cached: ${result.distanceMetres}m, ` +
+          `${result.durationSeconds}s, ${result.steps.length} steps`,
+      );
+
+      return result;
+    } catch (error) {
+      this.logger.error('Error calling Mapbox Directions API:', error);
+      return null;
+    }
   }
 }

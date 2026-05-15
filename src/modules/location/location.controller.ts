@@ -83,4 +83,21 @@ export class LocationController {
       limit || 50,
     );
   }
+
+  /**
+   * Polling endpoint for large journeys using RTDB polling strategy
+   * Returns locations updated since the specified timestamp
+   */
+  @Get('journeys/:journeyId/poll')
+  async pollLatestLocations(
+    @Param('journeyId') journeyId: string,
+    @CurrentUser('uid') userId: string,
+    @Query('since', new ParseIntPipe({ optional: true })) since?: number,
+  ) {
+    return this.locationService.getLocationsSince(
+      journeyId,
+      since || Date.now() - 30000, // Default to last 30 seconds
+      userId,
+    );
+  }
 }

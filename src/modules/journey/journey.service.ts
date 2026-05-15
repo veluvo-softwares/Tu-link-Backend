@@ -12,6 +12,7 @@ import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { ParticipantService } from './services/participant.service';
 import { NotificationService } from '../notification/notification.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
@@ -25,6 +26,7 @@ export class JourneyService {
     private participantService: ParticipantService,
     private notificationService: NotificationService,
     private configService: ConfigService,
+    private analyticsService: AnalyticsService,
   ) {}
 
   async create(
@@ -148,6 +150,33 @@ export class JourneyService {
           ),
         );
     }, cleanupDelayMs);
+
+    // Clean up all Redis keys for this journey
+    // Participant keys must be cleared before clearJourneyCache() removes the
+    // participant set, so read the set first.
+    const participantIds =
+      await this.redisService.getJourneyParticipants(journeyId);
+
+    await this.redisService.clearJourneyCache(journeyId);
+
+    // Clear per-participant connection state
+    const redisClient = this.redisService.getClient();
+    for (const participantId of participantIds) {
+      await redisClient.del(
+        `participant:${participantId}:connected`,
+        `participant:${participantId}:lastHeartbeat`,
+        `participant:${participantId}:socketId`,
+        `participant:${participantId}:lastSeq`,
+      );
+    }
+
+    // Clear WebSocket room key
+    await redisClient.del(`ws:room:${journeyId}`);
+
+    // Clear journey metrics cache
+    await redisClient.del(`journey_metrics:${journeyId}`);
+
+    console.log(`✅ Redis keys cleared for journey ${journeyId}`);
   }
 
   async start(journeyId: string, userId: string): Promise<Journey> {
@@ -231,6 +260,15 @@ export class JourneyService {
         updatedAt: FieldValue.serverTimestamp(),
       });
 
+    // Calculate and store analytics — fire-and-forget, do not block end()
+    this.analyticsService
+      .calculateJourneyAnalytics(journeyId)
+      .catch((err: Error) =>
+        console.error(
+          `Analytics calculation failed for journey ${journeyId}: ${err.message}`,
+        ),
+      );
+
     // Clean up RTDB positions after a delay
     const cleanupDelayMs =
       this.configService.get<number>('app.rtdbCleanupDelayMs') ?? 5000;
@@ -246,6 +284,33 @@ export class JourneyService {
 
     // Remove from active journeys in Redis
     await this.redisService.removeActiveJourney(journeyId);
+
+    // Clean up all Redis keys for this journey
+    // Participant keys must be cleared before clearJourneyCache() removes the
+    // participant set, so read the set first.
+    const cachedParticipantIds =
+      await this.redisService.getJourneyParticipants(journeyId);
+
+    await this.redisService.clearJourneyCache(journeyId);
+
+    // Clear per-participant connection state
+    const redisClient = this.redisService.getClient();
+    for (const participantId of cachedParticipantIds) {
+      await redisClient.del(
+        `participant:${participantId}:connected`,
+        `participant:${participantId}:lastHeartbeat`,
+        `participant:${participantId}:socketId`,
+        `participant:${participantId}:lastSeq`,
+      );
+    }
+
+    // Clear WebSocket room key
+    await redisClient.del(`ws:room:${journeyId}`);
+
+    // Clear journey metrics cache
+    await redisClient.del(`journey_metrics:${journeyId}`);
+
+    console.log(`✅ Redis keys cleared for journey ${journeyId}`);
 
     // Get all active participants and send journey ended notifications
     const participants =
