@@ -18,6 +18,7 @@ import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { ParticipantService } from '../journey/services/participant.service';
+import { JourneyService } from '../journey/journey.service';
 import { JourneyMetricsService } from '../journey/services/journey-metrics.service';
 import { LocationService } from './location.service';
 import { LocationBatchingService } from './services/location-batching.service';
@@ -46,6 +47,7 @@ export class LocationGateway
     private firebaseService: FirebaseService,
     private redisService: RedisService,
     private participantService: ParticipantService,
+    private journeyService: JourneyService,
     private journeyMetricsService: JourneyMetricsService,
     private locationService: LocationService,
     private locationBatchingService: LocationBatchingService,
@@ -344,14 +346,35 @@ export class LocationGateway
         });
       }
 
-      // Send arrival notification if detected
-      if (result.arrivalDetected) {
+      // Handle arrival events
+      if (result.arrival?.arrived) {
+        const { arrivedCount, totalCount, allArrived } = result.arrival;
+
+        // Notify all journey members of this participant's arrival with progress
         this.server
           .to(`journey:${payload.journeyId}`)
-          .emit('arrival-detected', {
+          .emit('participant-arrived', {
             userId,
+            arrivedCount,
+            totalCount,
+            allArrived,
             timestamp: Date.now(),
           });
+
+        // Auto-complete the journey when everyone has arrived
+        if (allArrived) {
+          try {
+            const journey = await this.journeyService.autoCompleteJourney(
+              payload.journeyId,
+            );
+            await this.broadcastJourneyEnded(payload.journeyId, journey);
+          } catch (endError) {
+            this.logger.error(
+              `Auto-complete failed for journey ${payload.journeyId}: ${endError.message}`,
+              'LocationGateway',
+            );
+          }
+        }
       }
     } catch (error) {
       const latency = Date.now() - startTime;

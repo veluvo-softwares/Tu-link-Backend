@@ -24,10 +24,10 @@ export default registerAs('app', () => ({
     process.env.ARRIVAL_SPEED_THRESHOLD_MPS || '1.39',
   ),
   heartbeatIntervalMs: parseInt(
-    process.env.HEARTBEAT_INTERVAL_MS || '4000',
+    process.env.HEARTBEAT_INTERVAL_MS || '10000',
     10,
   ),
-  heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '7000', 10),
+  heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '30000', 10),
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
   rtdbCleanupDelayMs: parseInt(process.env.RTDB_CLEANUP_DELAY_MS || '5000', 10),

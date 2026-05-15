@@ -349,7 +349,13 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
 
       arrivalDetectionService.detectArrival.mockImplementation(() => {
         callOrder.push('arrival');
-        return Promise.resolve(false);
+        return Promise.resolve({
+          arrived: false,
+          alreadyArrived: false,
+          arrivedCount: 0,
+          totalCount: 1,
+          allArrived: false,
+        });
       });
 
       firebaseService.setMemberPosition.mockImplementation(() => {
