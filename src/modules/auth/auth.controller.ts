@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   ParseIntPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -97,7 +98,10 @@ export class AuthController {
     description: 'Token refreshed successfully. Returns new ID token.',
   })
   @ApiResponse({ status: 401, description: 'Invalid or expired refresh token' })
-  async refresh(@Body() refreshTokenDto: { refreshToken: string }) {
+  async refresh(@Body() refreshTokenDto: { refreshToken?: string }) {
+    if (!refreshTokenDto?.refreshToken) {
+      throw new BadRequestException('refreshToken is required');
+    }
     return this.authService.refreshToken(refreshTokenDto.refreshToken);
   }
 

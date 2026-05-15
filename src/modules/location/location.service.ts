@@ -15,7 +15,10 @@ import { PriorityService } from './services/priority.service';
 import { SequenceService } from './services/sequence.service';
 import { AcknowledgmentService } from './services/acknowledgment.service';
 import { LagDetectionService } from './services/lag-detection.service';
-import { ArrivalDetectionService } from './services/arrival-detection.service';
+import {
+  ArrivalDetectionService,
+  ArrivalResult,
+} from './services/arrival-detection.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 import {
   LocationUpdate,
@@ -80,13 +83,24 @@ export class LocationService {
     priority: Priority;
     shouldBroadcast: boolean;
     lagAlert?: any;
-    arrivalDetected?: boolean;
+    arrival?: ArrivalResult;
   }> {
-    const { journeyId } = locationUpdateDto;
+    const { journeyId, location } = locationUpdateDto;
 
-    console.error(
-      `LocationService: Processing update for userId: ${userId}, journeyId: ${journeyId}`,
-    );
+    // Deduplicate identical updates arriving simultaneously via HTTP + WebSocket.
+    // Key encodes user, journey, and rounded coords so genuine moves aren't dropped.
+    const dedupKey = `dedup:loc:${userId}:${journeyId}:${location?.latitude?.toFixed(5)}:${location?.longitude?.toFixed(5)}`;
+    const alreadyProcessing = await this.redisService
+      .getClient()
+      .set(dedupKey, '1', 'EX', 2, 'NX');
+    if (!alreadyProcessing) {
+      return {
+        success: false,
+        sequenceNumber: 0,
+        priority: 'LOW' as any,
+        shouldBroadcast: false,
+      };
+    }
 
     // 1. Validate participant membership and journey status
     await this.validateParticipant(userId, journeyId);
@@ -216,7 +230,7 @@ export class LocationService {
     }
 
     // 14. Detect arrival
-    const arrivalDetected = await this.arrivalDetectionService.detectArrival(
+    const arrival = await this.arrivalDetectionService.detectArrival(
       locationUpdate,
       journey,
     );
@@ -243,8 +257,7 @@ export class LocationService {
       shouldBroadcast: true,
 
       lagAlert,
-
-      arrivalDetected,
+      arrival,
     };
   }
 
