@@ -58,6 +58,23 @@ export class FirebaseService implements OnModuleInit {
   }
 
   /**
+   * Update a member's position in RTDB (alias for setMemberPosition)
+   * Used by the polling strategy for location updates
+   */
+  async updateMemberPosition(
+    journeyId: string,
+    userId: string,
+    locationData: Record<string, unknown>,
+  ): Promise<void> {
+    // Add server timestamp for polling strategy
+    const dataWithTimestamp = {
+      ...locationData,
+      serverTimestamp: Date.now(),
+    };
+    await this.setMemberPosition(journeyId, userId, dataWithTimestamp);
+  }
+
+  /**
    * Remove a member's position node from RTDB.
    * Called when a member leaves a journey or disconnects.
    */
@@ -117,6 +134,103 @@ export class FirebaseService implements OnModuleInit {
         error,
       );
       return null;
+    }
+  }
+
+  /**
+   * Get locations that have been updated since a given timestamp
+   * Used by the polling strategy for incremental updates
+   */
+  async getLocationsSince(
+    journeyId: string,
+    sinceTimestamp: number,
+  ): Promise<Record<string, Record<string, unknown>>> {
+    try {
+      const snapshot = await this.rtdb
+        .ref(`journeys/${journeyId}/members`)
+        .once('value');
+
+      if (!snapshot.exists()) {
+        return {};
+      }
+
+      const allLocations = snapshot.val() as Record<
+        string,
+        Record<string, unknown>
+      >;
+      const filteredLocations: Record<string, Record<string, unknown>> = {};
+
+      // Filter locations updated since the given timestamp
+      for (const [userId, locationData] of Object.entries(allLocations)) {
+        const serverTimestamp = locationData.serverTimestamp as number;
+        const locationTimestamp = locationData.timestamp as number;
+
+        // Use server timestamp if available, otherwise fall back to location timestamp
+        const effectiveTimestamp = serverTimestamp || locationTimestamp;
+
+        if (effectiveTimestamp && effectiveTimestamp > sinceTimestamp) {
+          filteredLocations[userId] = locationData;
+        }
+      }
+
+      return filteredLocations;
+    } catch (error) {
+      console.error(
+        `Failed to get locations since ${sinceTimestamp} for journey ${journeyId}:`,
+        error,
+      );
+      return {};
+    }
+  }
+
+  /**
+   * Bulk update multiple member positions in RTDB
+   * Used by the batching strategy for efficient bulk updates
+   */
+  async bulkUpdateMemberPositions(
+    journeyId: string,
+    updates: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    try {
+      const updateObject: Record<string, Record<string, unknown>> = {};
+      const serverTimestamp = Date.now();
+
+      // Prepare bulk update object
+      for (const [userId, locationData] of Object.entries(updates)) {
+        updateObject[`journeys/${journeyId}/members/${userId}`] = {
+          ...locationData,
+          serverTimestamp,
+        };
+      }
+
+      // Perform bulk update
+      await this.rtdb.ref().update(updateObject);
+    } catch (error) {
+      console.error(
+        `Failed to bulk update member positions for journey ${journeyId}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Get participant count for a journey from RTDB
+   * Used for quick strategy decisions
+   */
+  async getJourneyParticipantCount(journeyId: string): Promise<number> {
+    try {
+      const snapshot = await this.rtdb
+        .ref(`journeys/${journeyId}/members`)
+        .once('value');
+
+      return snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+    } catch (error) {
+      console.error(
+        `Failed to get participant count for journey ${journeyId}:`,
+        error,
+      );
+      return 0;
     }
   }
 }

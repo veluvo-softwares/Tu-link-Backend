@@ -18,7 +18,10 @@ import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { ParticipantService } from '../journey/services/participant.service';
+import { JourneyMetricsService } from '../journey/services/journey-metrics.service';
 import { LocationService } from './location.service';
+import { LocationBatchingService } from './services/location-batching.service';
+import { WebSocketMetricsService } from './services/websocket-metrics.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 import { AcknowledgeDto } from './dto/acknowledge.dto';
 import { ResyncDto } from './dto/resync.dto';
@@ -43,7 +46,10 @@ export class LocationGateway
     private firebaseService: FirebaseService,
     private redisService: RedisService,
     private participantService: ParticipantService,
+    private journeyMetricsService: JourneyMetricsService,
     private locationService: LocationService,
+    private locationBatchingService: LocationBatchingService,
+    private webSocketMetricsService: WebSocketMetricsService,
     private configService: ConfigService,
     private logger: LoggerService,
   ) {}
@@ -260,7 +266,7 @@ export class LocationGateway
   }
 
   /**
-   * Handle location update from client
+   * Handle location update from client with adaptive strategy
    */
   @SubscribeMessage('location-update')
   async handleLocationUpdate(
@@ -268,6 +274,7 @@ export class LocationGateway
     @MessageBody() payload: LocationUpdateDto,
   ) {
     const userId = client.data.userId;
+    const startTime = Date.now();
 
     try {
       // Process the location update
@@ -289,29 +296,42 @@ export class LocationGateway
         return;
       }
 
-      // Send acknowledgment to sender
-      client.emit('location-update-ack', {
-        sequenceNumber: result.sequenceNumber,
-        priority: result.priority,
-        timestamp: Date.now(),
-      });
+      // Get optimal strategy for this journey
+      const strategy = await this.journeyMetricsService.getJourneyStrategy(
+        payload.journeyId,
+      );
 
-      // Broadcast to all participants in the journey
-      if (result.shouldBroadcast) {
-        this.server.to(`journey:${payload.journeyId}`).emit('location-update', {
-          userId,
-          participantId: client.data.userId,
-          location: payload.location,
-          accuracy: payload.accuracy,
-          heading: payload.heading,
-          speed: payload.speed,
-          altitude: payload.altitude,
-          timestamp: result.sequenceNumber,
-          sequenceNumber: result.sequenceNumber,
-          priority: result.priority,
-          metadata: payload.metadata,
-        });
+      // Route to appropriate handler based on strategy
+      switch (strategy) {
+        case 'REALTIME':
+          this.handleRealTimeUpdate(client, payload, result);
+          break;
+        case 'BATCHED':
+          await this.handleBatchedUpdate(client, payload, result);
+          break;
+        case 'POLLING':
+          await this.handlePollingUpdate(client, payload, result);
+          break;
+        default:
+          // Fallback to real-time
+          this.handleRealTimeUpdate(client, payload, result);
       }
+
+      // Update performance metrics
+      const latency = Date.now() - startTime;
+      await this.journeyMetricsService.updateStrategyMetrics(
+        payload.journeyId,
+        strategy,
+        latency,
+      );
+
+      // Track metrics in WebSocket metrics service
+      await this.webSocketMetricsService.trackBroadcastMetrics(
+        payload.journeyId,
+        strategy,
+        latency,
+        false, // No error if we reach this point
+      );
 
       // Send lag alert if detected
       if (result.lagAlert) {
@@ -334,11 +354,178 @@ export class LocationGateway
           });
       }
     } catch (error) {
+      const latency = Date.now() - startTime;
+
+      this.logger.error(
+        `Failed to process location update for journey ${payload.journeyId}: ${error.message}`,
+        'LocationGateway',
+      );
+
+      // Track error metrics
+      try {
+        const strategy = await this.journeyMetricsService.getJourneyStrategy(
+          payload.journeyId,
+        );
+        await this.webSocketMetricsService.trackBroadcastMetrics(
+          payload.journeyId,
+          strategy,
+          latency,
+          true, // This is an error
+        );
+      } catch (metricsError) {
+        // Don't fail the main operation if metrics tracking fails
+        this.logger.error(
+          `Failed to track error metrics: ${metricsError.message}`,
+        );
+      }
+
       client.emit('error', {
         message: error.message || 'Failed to process location update',
         timestamp: Date.now(),
       });
     }
+  }
+
+  /**
+   * Handle real-time location update (immediate broadcast)
+   */
+  private handleRealTimeUpdate(
+    client: Socket,
+    payload: LocationUpdateDto,
+    result: any,
+  ): void {
+    const userId = client.data.userId;
+
+    // Send immediate acknowledgment to sender
+    client.emit('location-update-ack', {
+      sequenceNumber: result.sequenceNumber,
+      priority: result.priority,
+      timestamp: Date.now(),
+      strategy: 'REALTIME',
+    });
+
+    // Immediate broadcast to all participants
+    if (result.shouldBroadcast) {
+      this.server.to(`journey:${payload.journeyId}`).emit('location-update', {
+        userId,
+        participantId: client.data.userId,
+        location: payload.location,
+        accuracy: payload.accuracy,
+        heading: payload.heading,
+        speed: payload.speed,
+        altitude: payload.altitude,
+        timestamp: result.sequenceNumber,
+        sequenceNumber: result.sequenceNumber,
+        priority: result.priority,
+        metadata: payload.metadata,
+      });
+    }
+
+    this.logger.debug(
+      `Real-time update processed for journey ${payload.journeyId}`,
+      'LocationGateway',
+    );
+  }
+
+  /**
+   * Handle batched location update (add to batch)
+   */
+  private async handleBatchedUpdate(
+    client: Socket,
+    payload: LocationUpdateDto,
+    result: any,
+  ): Promise<void> {
+    const userId = client.data.userId;
+
+    // Transform to location update format
+    const locationUpdate = {
+      journeyId: payload.journeyId,
+      participantId: userId,
+      location: payload.location,
+      accuracy: payload.accuracy,
+      heading: payload.heading,
+      speed: payload.speed,
+      altitude: payload.altitude,
+      timestamp: result.sequenceNumber,
+      sequenceNumber: result.sequenceNumber,
+      priority: result.priority,
+      metadata: payload.metadata,
+    };
+
+    // Add to batch
+    if (result.shouldBroadcast) {
+      await this.locationBatchingService.addToBatch(
+        payload.journeyId,
+        locationUpdate,
+      );
+    }
+
+    // Get next broadcast time
+    const nextBroadcast =
+      Date.now() +
+      this.locationBatchingService.getTimeUntilNextFlush(payload.journeyId);
+
+    // Send acknowledgment with batch info
+    client.emit('location-update-ack', {
+      sequenceNumber: result.sequenceNumber,
+      priority: result.priority,
+      timestamp: Date.now(),
+      strategy: 'BATCHED',
+      nextBroadcast,
+    });
+
+    this.logger.debug(
+      `Batched update added for journey ${payload.journeyId}. Next flush in ${this.locationBatchingService.getTimeUntilNextFlush(payload.journeyId)}ms`,
+      'LocationGateway',
+    );
+  }
+
+  /**
+   * Handle polling-based update (RTDB only, no WebSocket broadcast)
+   */
+  private async handlePollingUpdate(
+    client: Socket,
+    payload: LocationUpdateDto,
+    result: any,
+  ): Promise<void> {
+    const userId = client.data.userId;
+
+    // Write directly to RTDB without WebSocket broadcast
+    if (result.shouldBroadcast) {
+      const locationUpdate = {
+        location: payload.location,
+        accuracy: payload.accuracy,
+        heading: payload.heading,
+        speed: payload.speed,
+        altitude: payload.altitude,
+        timestamp: result.sequenceNumber,
+        sequenceNumber: result.sequenceNumber,
+        priority: result.priority,
+        metadata: payload.metadata,
+      };
+
+      await this.firebaseService.updateMemberPosition(
+        payload.journeyId,
+        userId,
+        locationUpdate,
+      );
+    }
+
+    // Send acknowledgment with polling instruction
+    client.emit('location-update-ack', {
+      sequenceNumber: result.sequenceNumber,
+      priority: result.priority,
+      timestamp: Date.now(),
+      strategy: 'POLLING',
+      pollEndpoint: `/locations/journeys/${payload.journeyId}/poll`,
+      recommendedInterval:
+        this.configService.get('app.websocket.pollingIntervalMs') || 5000,
+    });
+
+    this.logger.debug(
+      `Polling update stored in RTDB for journey ${payload.journeyId}`,
+      'LocationGateway',
+    );
   }
 
   /**
