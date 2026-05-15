@@ -31,4 +31,21 @@ export default registerAs('app', () => ({
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
   rtdbCleanupDelayMs: parseInt(process.env.RTDB_CLEANUP_DELAY_MS || '5000', 10),
+  websocket: {
+    smallJourneyThreshold: parseInt(
+      process.env.WS_SMALL_JOURNEY_THRESHOLD || '5',
+      10,
+    ),
+    mediumJourneyThreshold: parseInt(
+      process.env.WS_MEDIUM_JOURNEY_THRESHOLD || '20',
+      10,
+    ),
+    batchIntervalMs: parseInt(process.env.WS_BATCH_INTERVAL_MS || '2500', 10),
+    pollingIntervalMs: parseInt(
+      process.env.WS_POLLING_INTERVAL_MS || '5000',
+      10,
+    ),
+    maxBatchSize: parseInt(process.env.WS_MAX_BATCH_SIZE || '50', 10),
+    maxBatchDelayMs: parseInt(process.env.WS_MAX_BATCH_DELAY_MS || '3000', 10),
+  },
 }));
