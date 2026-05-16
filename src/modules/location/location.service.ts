@@ -570,7 +570,11 @@ export class LocationService {
     const journey = await this.journeyService.findById(journeyId);
 
     if (journey.status !== 'ACTIVE') {
-      throw new BadRequestException('Journey is not active');
+      throw new BadRequestException({
+        message: 'Journey is not active',
+        journeyStatus: journey.status,
+        stopPolling: true,
+      });
     }
 
     const isActive = await this.participantService.isActiveParticipant(
