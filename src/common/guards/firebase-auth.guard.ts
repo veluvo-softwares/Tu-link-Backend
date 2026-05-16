@@ -30,22 +30,21 @@ export class FirebaseAuthGuard implements CanActivate {
     }
 
     try {
-      // Verify the ID token
       const decodedToken = await this.firebaseService.auth.verifyIdToken(token);
 
-      // Get user record to check if tokens have been revoked
       const userRecord = await this.firebaseService.auth.getUser(
         decodedToken.uid,
       );
 
-      // Check if the token was issued before the revocation time
-      // tokensValidAfterTime is set when revokeRefreshTokens() is called
       if (userRecord.tokensValidAfterTime) {
         const tokenIssuedAt = new Date(decodedToken.iat * 1000);
         const tokensValidAfter = new Date(userRecord.tokensValidAfterTime);
 
         if (tokenIssuedAt < tokensValidAfter) {
-          throw new UnauthorizedException('Please login again');
+          throw new UnauthorizedException({
+            message: 'Please login again',
+            code: 'TOKEN_REVOKED',
+          });
         }
       }
 
@@ -59,7 +58,21 @@ export class FirebaseAuthGuard implements CanActivate {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      throw new UnauthorizedException('Please login again');
+      // Surface expired-token separately so the Flutter client can silently
+      // refresh via FirebaseAuth.currentUser.getIdToken(true) instead of
+      // prompting a full re-login.
+      const firebaseError = error as { errorInfo?: { code?: string } };
+      const code: string = firebaseError.errorInfo?.code ?? '';
+      if (code === 'auth/id-token-expired') {
+        throw new UnauthorizedException({
+          message: 'Token expired, please refresh',
+          code: 'TOKEN_EXPIRED',
+        });
+      }
+      throw new UnauthorizedException({
+        message: 'Please login again',
+        code: 'AUTH_FAILED',
+      });
     }
   }
 
