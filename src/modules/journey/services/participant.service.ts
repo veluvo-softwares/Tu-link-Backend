@@ -162,7 +162,12 @@ export class ParticipantService {
       .doc(userId)
       .get();
 
-    return participantDoc.exists;
+    if (!participantDoc.exists) return false;
+    const participant = participantDoc.data() as Participant;
+    return (
+      ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(participant.status) ||
+      participant.role === 'LEADER'
+    );
   }
 
   async isActiveParticipant(

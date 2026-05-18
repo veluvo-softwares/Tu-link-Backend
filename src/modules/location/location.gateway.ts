@@ -658,6 +658,10 @@ export class LocationGateway
     });
   }
 
+  broadcastParticipantAccepted(journeyId: string, data: object) {
+    this.server.to(`journey:${journeyId}`).emit('participant-accepted', data);
+  }
+
   /**
    * Start heartbeat monitoring for a client
    */
