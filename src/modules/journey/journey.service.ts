@@ -13,6 +13,7 @@ import { RedisService } from '../../shared/redis/redis.service';
 import { ParticipantService } from './services/participant.service';
 import { NotificationService } from '../notification/notification.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { LocationGateway } from '../location/location.gateway';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
@@ -27,6 +28,7 @@ export class JourneyService {
     private notificationService: NotificationService,
     private configService: ConfigService,
     private analyticsService: AnalyticsService,
+    private locationGateway: LocationGateway,
   ) {}
 
   async create(
@@ -236,6 +238,14 @@ export class JourneyService {
       journey.name,
       participantIds,
     );
+
+    // Broadcast to all members in the WebSocket room so members on the home
+    // screen can navigate to the map without waiting for an FCM notification.
+    await this.locationGateway.broadcastJourneyStarted(journeyId, {
+      journeyId,
+      journeyName: journey.name,
+      status: 'ACTIVE',
+    });
 
     return this.findById(journeyId);
   }
