@@ -3,6 +3,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
+  Inject,
+  forwardRef,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -28,6 +30,7 @@ export class JourneyService {
     private notificationService: NotificationService,
     private configService: ConfigService,
     private analyticsService: AnalyticsService,
+    @Inject(forwardRef(() => LocationGateway))
     private locationGateway: LocationGateway,
   ) {}
 
