@@ -11,7 +11,7 @@ import {
   MessageBody,
   WsException,
 } from '@nestjs/websockets';
-import { UseFilters } from '@nestjs/common';
+import { UseFilters, Inject, forwardRef } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
@@ -46,8 +46,11 @@ export class LocationGateway
   constructor(
     private firebaseService: FirebaseService,
     private redisService: RedisService,
+    @Inject(forwardRef(() => ParticipantService))
     private participantService: ParticipantService,
+    @Inject(forwardRef(() => JourneyService))
     private journeyService: JourneyService,
+    @Inject(forwardRef(() => JourneyMetricsService))
     private journeyMetricsService: JourneyMetricsService,
     private locationService: LocationService,
     private locationBatchingService: LocationBatchingService,

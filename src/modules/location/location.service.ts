@@ -3,6 +3,8 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
+  Inject,
+  forwardRef,
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common';
@@ -60,6 +62,7 @@ export class LocationService {
   constructor(
     private firebaseService: FirebaseService,
     private redisService: RedisService,
+    @Inject(forwardRef(() => JourneyService))
     private journeyService: JourneyService,
     private participantService: ParticipantService,
     private priorityService: PriorityService,
