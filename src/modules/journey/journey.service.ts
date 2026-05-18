@@ -355,7 +355,25 @@ export class JourneyService {
       notifyIds,
     );
 
+    await this.locationGateway.broadcastJourneyEnded(journeyId, journey);
+
     return journey;
+  }
+
+  async acceptInvitation(journeyId: string, userId: string): Promise<void> {
+    await this.participantService.acceptInvitation(journeyId, userId);
+
+    const userDoc = await this.firebaseService.firestore
+      .collection('users')
+      .doc(userId)
+      .get();
+    const displayName = userDoc.data()?.displayName || 'Unknown';
+
+    this.locationGateway.broadcastParticipantAccepted(journeyId, {
+      userId,
+      displayName,
+      status: 'ACCEPTED',
+    });
   }
 
   async inviteParticipant(

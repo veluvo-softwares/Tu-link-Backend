@@ -233,7 +233,7 @@ export class JourneyController {
     description: 'Journey not found OR Invitation not found',
   })
   async accept(@Param('id') id: string, @CurrentUser('uid') userId: string) {
-    await this.participantService.acceptInvitation(id, userId);
+    await this.journeyService.acceptInvitation(id, userId);
     return { message: 'Invitation accepted' };
   }
 
