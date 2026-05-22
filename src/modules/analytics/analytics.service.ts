@@ -124,47 +124,63 @@ export class AnalyticsService {
     userId: string,
     limit: number = 20,
   ): Promise<any[]> {
-    // Get all journeys where user was a participant
+    // 1) Find all journey IDs where the user was a participant.
+    //    collectionGroup('participants') gives us participant docs across
+    //    every journey; the parent ref is the journey doc.
     const participantsSnapshot = await this.firebaseService.firestore
       .collectionGroup('participants')
       .where('userId', '==', userId)
       .get();
 
-    const journeyIds = new Set(
-      participantsSnapshot.docs
-        .map((doc) => doc.ref.parent.parent?.id)
-        .filter((id): id is string => id !== undefined),
+    const journeyIds = Array.from(
+      new Set(
+        participantsSnapshot.docs
+          .map((doc) => doc.ref.parent.parent?.id)
+          .filter((id): id is string => id !== undefined),
+      ),
     );
 
-    const journeys: any[] = [];
+    if (journeyIds.length === 0) return [];
 
-    for (const journeyId of Array.from(journeyIds).slice(0, limit)) {
-      const journeyDoc = await this.firebaseService.firestore
-        .collection('journeys')
-        .doc(journeyId)
-        .get();
+    // 2) Fetch every journey doc in parallel. This is the slowest part of
+    //    the request; sequential fetches were the source of the N+1.
+    //    For users with hundreds of journeys this could be batched into
+    //    Firestore 'in' queries (10 IDs per query), but at current scale
+    //    (~20-30 journeys per user) the parallel-fetch pattern is fine.
+    const journeyDocs = await Promise.all(
+      journeyIds.map((id) =>
+        this.firebaseService.firestore.collection('journeys').doc(id).get(),
+      ),
+    );
 
-      if (!journeyDoc.exists) continue;
+    // 3) Filter to existing docs, then sort by createdAt desc BEFORE slicing.
+    //    This is the fix: previously the slice happened before the sort, so
+    //    newly created/completed journeys outside the arbitrary first N
+    //    Firestore returned were silently dropped.
+    const sortedJourneys = journeyDocs
+      .filter((doc) => doc.exists)
+      .map((doc) => ({ id: doc.id, ...doc.data() }) as any)
+      .sort((a, b) => {
+        // Defensive: a missing createdAt sorts to the bottom rather than
+        // throwing. In practice createdAt is always set at journey creation.
+        const aTime = a.createdAt?.toMillis?.() ?? 0;
+        const bTime = b.createdAt?.toMillis?.() ?? 0;
+        return bTime - aTime;
+      })
+      .slice(0, limit);
 
-      const journey = { id: journeyDoc.id, ...journeyDoc.data() };
+    // 4) Fetch analytics for the limited set in parallel. Analytics is null
+    //    for journeys that never started (PENDING) or where the post-trip
+    //    calculation hasn't run yet — both are valid states the client
+    //    already handles.
+    const analyticsResults = await Promise.all(
+      sortedJourneys.map((journey) => this.getJourneyAnalytics(journey.id)),
+    );
 
-      // Get analytics if available
-      const analytics = await this.getJourneyAnalytics(journeyId);
-
-      journeys.push({
-        ...journey,
-        analytics,
-      });
-    }
-
-    // Sort by creation date
-    journeys.sort((a, b) => {
-      const aTime = a.createdAt?.toMillis() || 0;
-      const bTime = b.createdAt?.toMillis() || 0;
-      return bTime - aTime;
-    });
-
-    return journeys;
+    return sortedJourneys.map((journey, index) => ({
+      ...journey,
+      analytics: analyticsResults[index],
+    }));
   }
 
   /**
