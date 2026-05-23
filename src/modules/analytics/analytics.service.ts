@@ -177,10 +177,18 @@ export class AnalyticsService {
       sortedJourneys.map((journey) => this.getJourneyAnalytics(journey.id)),
     );
 
-    return sortedJourneys.map((journey, index) => ({
-      ...journey,
-      analytics: analyticsResults[index],
-    }));
+    return sortedJourneys.map((journey, index) => {
+      const analytics = analyticsResults[index];
+      // The list endpoint omits routePolyline because it can be ~30 KB per
+      // journey and the home screen / history list don't render it. Clients
+      // that need the polyline (e.g. JourneyDetailsScreen) fetch it via
+      // GET /analytics/journeys/:id, which returns the full analytics doc.
+      const listAnalytics = analytics
+        ? // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          (({ routePolyline, ...rest }) => rest)(analytics)
+        : null;
+      return { ...journey, analytics: listAnalytics };
+    });
   }
 
   /**
