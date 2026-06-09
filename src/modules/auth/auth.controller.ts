@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
   BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -86,6 +87,7 @@ export class AuthController {
   }
 
   @Post('guest-sign-in')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Sign in as a guest using Firebase Anonymous Authentication',
@@ -142,8 +144,11 @@ A Firestore user document is created with isGuest:true.`,
     status: 401,
     description: 'Unauthorized - invalid or expired token',
   })
-  async logout(@CurrentUser('uid') uid: string) {
-    return this.authService.logout(uid);
+  async logout(
+    @CurrentUser('uid') uid: string,
+    @CurrentUser('isGuest') isGuest: boolean,
+  ) {
+    return this.authService.logout(uid, isGuest);
   }
 
   @Get('profile')

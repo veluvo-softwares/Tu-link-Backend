@@ -405,12 +405,16 @@ export class AuthService {
     }
   }
 
-  async logout(uid: string): Promise<{ message: string }> {
+  async logout(uid: string, isGuest = false): Promise<{ message: string }> {
     try {
-      // Revoke all refresh tokens for the user
+      if (isGuest) {
+        // Delete the anonymous account entirely — nothing to preserve
+        await this.firebaseService.auth.deleteUser(uid);
+        return { message: 'Successfully logged out' };
+      }
+
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
-      // Update user metadata to track the revocation time
       const userDoc = await this.firebaseService.firestore
         .collection('users')
         .doc(uid)
@@ -420,15 +424,12 @@ export class AuthService {
         await this.firebaseService.firestore
           .collection('users')
           .doc(uid)
-
           .update({
             lastLogout: FieldValue.serverTimestamp(),
           });
       }
 
-      return {
-        message: 'Successfully logged out',
-      };
+      return { message: 'Successfully logged out' };
     } catch (error) {
       if (error.code === 'auth/user-not-found') {
         throw new NotFoundException('User not found');
@@ -516,12 +517,9 @@ export class AuthService {
 
   async guestSignIn(): Promise<AuthResponse> {
     try {
-      // Call Firebase REST API for anonymous sign-in (signUp with no email/password)
       const response = await axios.post(
         `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
-        {
-          returnSecureToken: true,
-        },
+        { returnSecureToken: true },
       );
 
       const { localId, idToken, refreshToken, expiresIn } = response.data as {
@@ -530,20 +528,6 @@ export class AuthService {
         refreshToken: string;
         expiresIn: string;
       };
-
-      // Create Firestore document for the anonymous user
-      await this.firebaseService.firestore.collection('users').doc(localId).set(
-        {
-          displayName: 'Guest',
-          email: '',
-          emailVerified: false,
-          phoneVerified: false,
-          isGuest: true,
-          createdAt: FieldValue.serverTimestamp(),
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
 
       return {
         user: {

@@ -14,6 +14,7 @@ interface AuthRequest {
     uid: string;
     email?: string;
     emailVerified?: boolean;
+    isGuest?: boolean;
   };
 }
 
@@ -31,20 +32,25 @@ export class FirebaseAuthGuard implements CanActivate {
 
     try {
       const decodedToken = await this.firebaseService.auth.verifyIdToken(token);
+      const isGuest = decodedToken.firebase?.sign_in_provider === 'anonymous';
 
-      const userRecord = await this.firebaseService.auth.getUser(
-        decodedToken.uid,
-      );
+      // Skip revocation check for anonymous sessions — they have no re-login path
+      // and getUser can fail with auth/user-not-found after account deletion.
+      if (!isGuest) {
+        const userRecord = await this.firebaseService.auth.getUser(
+          decodedToken.uid,
+        );
 
-      if (userRecord.tokensValidAfterTime) {
-        const tokenIssuedAt = new Date(decodedToken.iat * 1000);
-        const tokensValidAfter = new Date(userRecord.tokensValidAfterTime);
+        if (userRecord.tokensValidAfterTime) {
+          const tokenIssuedAt = new Date(decodedToken.iat * 1000);
+          const tokensValidAfter = new Date(userRecord.tokensValidAfterTime);
 
-        if (tokenIssuedAt < tokensValidAfter) {
-          throw new UnauthorizedException({
-            message: 'Please login again',
-            code: 'TOKEN_REVOKED',
-          });
+          if (tokenIssuedAt < tokensValidAfter) {
+            throw new UnauthorizedException({
+              message: 'Please login again',
+              code: 'TOKEN_REVOKED',
+            });
+          }
         }
       }
 
@@ -52,6 +58,7 @@ export class FirebaseAuthGuard implements CanActivate {
         uid: decodedToken.uid,
         email: decodedToken.email,
         emailVerified: decodedToken.email_verified,
+        isGuest,
       };
       return true;
     } catch (error) {
@@ -69,6 +76,10 @@ export class FirebaseAuthGuard implements CanActivate {
           code: 'TOKEN_EXPIRED',
         });
       }
+      console.error(
+        'FirebaseAuthGuard token verification failed:',
+        code || error,
+      );
       throw new UnauthorizedException({
         message: 'Please login again',
         code: 'AUTH_FAILED',
