@@ -92,9 +92,10 @@ export class AuthController {
   @ApiOperation({
     summary: 'Sign in as a guest using Firebase Anonymous Authentication',
     description: `Creates an anonymous Firebase session without requiring email or password.
+Each call creates a distinct anonymous Firebase user (no session/user reuse).
 
 Returns a valid Firebase ID token that is accepted by FirebaseAuthGuard on all protected endpoints.
-A Firestore user document is created with isGuest:true.`,
+No persistent user document is created; the anonymous account is deleted on logout.`,
   })
   @ApiResponse({
     status: 200,

@@ -520,6 +520,7 @@ export class AuthService {
       const response = await axios.post(
         `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
         { returnSecureToken: true },
+        { timeout: 8000 },
       );
 
       const { localId, idToken, refreshToken, expiresIn } = response.data as {
