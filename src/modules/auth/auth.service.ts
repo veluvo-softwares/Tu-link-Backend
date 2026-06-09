@@ -514,6 +514,56 @@ export class AuthService {
     }
   }
 
+  async guestSignIn(): Promise<AuthResponse> {
+    try {
+      // Call Firebase REST API for anonymous sign-in (signUp with no email/password)
+      const response = await axios.post(
+        `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
+        {
+          returnSecureToken: true,
+        },
+      );
+
+      const { localId, idToken, refreshToken, expiresIn } = response.data as {
+        localId: string;
+        idToken: string;
+        refreshToken: string;
+        expiresIn: string;
+      };
+
+      // Create Firestore document for the anonymous user
+      await this.firebaseService.firestore.collection('users').doc(localId).set(
+        {
+          displayName: 'Guest',
+          email: '',
+          emailVerified: false,
+          phoneVerified: false,
+          isGuest: true,
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      return {
+        user: {
+          uid: localId,
+          email: '',
+          displayName: 'Guest',
+          emailVerified: false,
+        },
+        tokens: {
+          idToken,
+          refreshToken,
+          expiresIn: parseInt(expiresIn),
+        },
+      };
+    } catch (error) {
+      console.error('Guest sign-in error:', error);
+      throw new UnauthorizedException('Guest sign-in failed');
+    }
+  }
+
   /**
    * Send email verification
    */

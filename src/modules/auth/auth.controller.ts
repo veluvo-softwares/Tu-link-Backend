@@ -85,6 +85,25 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
+  @Post('guest-sign-in')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sign in as a guest using Firebase Anonymous Authentication',
+    description: `Creates an anonymous Firebase session without requiring email or password.
+
+Returns a valid Firebase ID token that is accepted by FirebaseAuthGuard on all protected endpoints.
+A Firestore user document is created with isGuest:true.`,
+  })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Guest sign-in successful. Returns anonymous user data with tokens.',
+  })
+  @ApiResponse({ status: 401, description: 'Guest sign-in failed' })
+  async guestSignIn() {
+    return this.authService.guestSignIn();
+  }
+
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
