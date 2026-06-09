@@ -31,7 +31,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
       isGlobal: true,
       load: [appConfig, firebaseConfig, redisConfig, mapsConfig],
     }),
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 10 }]),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     // Shared modules
     LoggerModule,
     FirebaseModule,
