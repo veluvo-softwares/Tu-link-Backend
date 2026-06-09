@@ -7,6 +7,7 @@ export interface User {
   phoneNumber?: string;
   emailVerified?: boolean;
   phoneVerified?: boolean;
+  isGuest?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

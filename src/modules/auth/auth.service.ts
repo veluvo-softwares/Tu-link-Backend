@@ -405,12 +405,16 @@ export class AuthService {
     }
   }
 
-  async logout(uid: string): Promise<{ message: string }> {
+  async logout(uid: string, isGuest = false): Promise<{ message: string }> {
     try {
-      // Revoke all refresh tokens for the user
+      if (isGuest) {
+        // Delete the anonymous account entirely — nothing to preserve
+        await this.firebaseService.auth.deleteUser(uid);
+        return { message: 'Successfully logged out' };
+      }
+
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
-      // Update user metadata to track the revocation time
       const userDoc = await this.firebaseService.firestore
         .collection('users')
         .doc(uid)
@@ -420,15 +424,12 @@ export class AuthService {
         await this.firebaseService.firestore
           .collection('users')
           .doc(uid)
-
           .update({
             lastLogout: FieldValue.serverTimestamp(),
           });
       }
 
-      return {
-        message: 'Successfully logged out',
-      };
+      return { message: 'Successfully logged out' };
     } catch (error) {
       if (error.code === 'auth/user-not-found') {
         throw new NotFoundException('User not found');
@@ -511,6 +512,40 @@ export class AuthService {
     } catch (error) {
       console.error('User search error:', error);
       throw new Error('Failed to search users');
+    }
+  }
+
+  async guestSignIn(): Promise<AuthResponse> {
+    try {
+      const response = await axios.post(
+        `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
+        { returnSecureToken: true },
+        { timeout: 8000 },
+      );
+
+      const { localId, idToken, refreshToken, expiresIn } = response.data as {
+        localId: string;
+        idToken: string;
+        refreshToken: string;
+        expiresIn: string;
+      };
+
+      return {
+        user: {
+          uid: localId,
+          email: '',
+          displayName: 'Guest',
+          emailVerified: false,
+        },
+        tokens: {
+          idToken,
+          refreshToken,
+          expiresIn: parseInt(expiresIn),
+        },
+      };
+    } catch (error) {
+      console.error('Guest sign-in error:', error);
+      throw new UnauthorizedException('Guest sign-in failed');
     }
   }
 

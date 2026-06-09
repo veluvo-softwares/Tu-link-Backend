@@ -61,3 +61,5 @@ serviceAccountKey.json
 .firebase/
 
 /Docs
+# GSD planning artifacts
+.planning/
