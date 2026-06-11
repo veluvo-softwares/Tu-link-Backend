@@ -7,8 +7,8 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (skip prepare scripts to avoid husky in Docker)
-RUN npm ci --only=production --ignore-scripts && npm cache clean --force
+# Install all dependencies including devDependencies needed for the build (e.g. @nestjs/cli)
+RUN npm ci --ignore-scripts && npm cache clean --force
 
 # Copy source code
 COPY . .
