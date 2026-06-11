@@ -365,7 +365,32 @@ export class JourneyService {
   }
 
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
-    await this.participantService.acceptInvitation(journeyId, userId);
+    const journey = await this.findById(journeyId);
+
+    if (journey.status === 'ACTIVE') {
+      // Journey already started — promote directly to ACTIVE so the user can
+      // immediately join the WebSocket room and send location updates.
+      const participantRef = this.firebaseService.firestore
+        .collection('journeys')
+        .doc(journeyId)
+        .collection('participants')
+        .doc(userId);
+
+      const participantDoc = await participantRef.get();
+      if (!participantDoc.exists) {
+        throw new NotFoundException('Invitation not found');
+      }
+
+      await participantRef.update({
+        status: 'ACTIVE',
+        joinedAt: FieldValue.serverTimestamp(),
+      });
+
+      // Add to the Redis participants set so they appear in live snapshot queries.
+      await this.redisService.addJourneyParticipant(journeyId, userId);
+    } else {
+      await this.participantService.acceptInvitation(journeyId, userId);
+    }
 
     const userDoc = await this.firebaseService.firestore
       .collection('users')
@@ -376,7 +401,7 @@ export class JourneyService {
     this.locationGateway.broadcastParticipantAccepted(journeyId, {
       userId,
       displayName,
-      status: 'ACCEPTED',
+      status: journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED',
     });
   }
 
