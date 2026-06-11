@@ -185,20 +185,21 @@ jobs:
             git reset --hard origin/dev
 
             # Rebuild and restart api-dev only (Redis keeps running)
-            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --build api-dev
+            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --build --remove-orphans api-dev
 
-            # Wait for api-dev to pass its health check
+            # Wait for Docker's own health check to pass (port is internal, can't curl from host)
             echo "Waiting for api-dev to be healthy..."
             for i in {1..30}; do
-              if curl -sf http://localhost:3000/health > /dev/null; then
+              status=$(docker inspect --format='{{.State.Health.Status}}' api-dev 2>/dev/null)
+              if [ "$status" = "healthy" ]; then
                 echo "api-dev is healthy!"
                 break
               fi
               if [ $i -eq 30 ]; then
-                echo "Health check failed after 30 attempts"
+                echo "Health check failed after 30 attempts (last status: $status)"
                 exit 1
               fi
-              echo "Attempt $i/30: not ready, waiting 10s..."
+              echo "Attempt $i/30: status=$status, waiting 10s..."
               sleep 10
             done
 
