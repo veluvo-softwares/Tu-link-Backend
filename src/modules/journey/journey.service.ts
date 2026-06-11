@@ -355,9 +355,13 @@ export class JourneyService {
       notifyIds,
     );
 
-    await this.locationGateway.broadcastJourneyEnded(journeyId, journey);
+    const journeyWithParticipants = { ...journey, participants };
+    await this.locationGateway.broadcastJourneyEnded(
+      journeyId,
+      journeyWithParticipants,
+    );
 
-    return journey;
+    return journeyWithParticipants;
   }
 
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
