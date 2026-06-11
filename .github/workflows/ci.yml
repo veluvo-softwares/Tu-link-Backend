@@ -165,6 +165,9 @@ jobs:
     environment: development
 
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.8.0
         with:
@@ -173,16 +176,22 @@ jobs:
       - name: Add server to known hosts
         run: ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
 
+      - name: Sync code to droplet
+        run: |
+          rsync -avz --delete \
+            --exclude='.git' \
+            --exclude='node_modules' \
+            --exclude='.env*' \
+            --exclude='coverage' \
+            --exclude='dist' \
+            ./ ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}:/root/tulink-backend/
+
       - name: Deploy to DigitalOcean Droplet
         run: |
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
 
             cd /root/tulink-backend
-
-            # Pull latest changes
-            git fetch origin
-            git reset --hard origin/dev
 
             # Rebuild and restart api-dev only (Redis keeps running)
             docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --build --remove-orphans api-dev
