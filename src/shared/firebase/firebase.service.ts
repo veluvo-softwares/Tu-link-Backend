@@ -224,7 +224,9 @@ export class FirebaseService implements OnModuleInit {
         .ref(`journeys/${journeyId}/members`)
         .once('value');
 
-      return snapshot.exists() ? Object.keys(snapshot.val()).length : 0;
+      return snapshot.exists()
+        ? Object.keys(snapshot.val() as Record<string, unknown>).length
+        : 0;
     } catch (error) {
       console.error(
         `Failed to get participant count for journey ${journeyId}:`,

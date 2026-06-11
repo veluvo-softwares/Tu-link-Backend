@@ -203,12 +203,16 @@ export class LocationGateway
         timestamp: Date.now(),
       });
 
-      // Send latest locations to the newly joined participant
+      // Refresh snapshot for everyone in the room — this covers the case
+      // where an existing participant's Flutter client misses the new joiner
+      // because it never receives a fresh latest-locations snapshot on its own.
       const latestLocations = await this.locationService.getLatestLocations(
         journeyId,
         userId,
       );
-      client.emit('latest-locations', latestLocations);
+      this.server
+        .to(`journey:${journeyId}`)
+        .emit('latest-locations', latestLocations);
     } catch (error) {
       client.emit('error', {
         message: error.message || 'Failed to join journey',

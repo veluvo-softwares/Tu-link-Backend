@@ -81,7 +81,12 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
       },
     };
 
+    const mockRedisClient = {
+      set: jest.fn().mockResolvedValue('OK'), // NX SET: 'OK' = key absent (not a duplicate); null = key exists (duplicate, skip)
+    };
+
     const mockRedisService = {
+      getClient: jest.fn().mockReturnValue(mockRedisClient),
       checkRateLimit: jest.fn().mockResolvedValue(true),
       cacheLocation: jest.fn().mockResolvedValue(undefined),
       getCachedLocation: jest.fn().mockResolvedValue(null),
