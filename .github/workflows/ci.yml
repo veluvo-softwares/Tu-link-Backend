@@ -151,7 +151,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
 
   deploy:
     name: Deploy to DigitalOcean
@@ -161,76 +161,60 @@ jobs:
     environment: development
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.8.0
         with:
           ssh-private-key: ${{ secrets.DROPLET_SSH_KEY }}
 
       - name: Add server to known hosts
-        run: |
-          ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
+        run: ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to DigitalOcean Droplet
         run: |
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
-            
-            # Navigate to application directory
-            cd /opt/tulink-backend
-            
-            # Create backup of current deployment
-            sudo cp config/docker/docker-compose.dev.yml config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S)
-            
+
+            cd /root/tulink-backend
+
             # Pull latest changes
             git fetch origin
             git reset --hard origin/dev
-            
-            # Stop current containers
-            docker compose -f config/docker/docker-compose.dev.yml down
-            
-            # Start containers with latest code (rebuild with new changes)
-            docker compose -f config/docker/docker-compose.dev.yml up -d --build
-            
-            # Wait for health check
-            echo "Waiting for application to be healthy..."
+
+            # Rebuild and restart api-dev only (Redis keeps running)
+            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --build api-dev
+
+            # Wait for api-dev to pass its health check
+            echo "Waiting for api-dev to be healthy..."
             for i in {1..30}; do
-              if curl -f http://localhost:3000/health > /dev/null 2>&1; then
-                echo "Application is healthy!"
+              if curl -sf http://localhost:3000/health > /dev/null; then
+                echo "api-dev is healthy!"
                 break
               fi
               if [ $i -eq 30 ]; then
-                echo "Health check failed after 30 attempts, rolling back..."
-                docker compose -f config/docker/docker-compose.dev.yml.backup.$(date +%Y%m%d_%H%M%S) up -d
+                echo "Health check failed after 30 attempts"
                 exit 1
               fi
-              echo "Attempt $i/30: Application not ready yet, waiting..."
+              echo "Attempt $i/30: not ready, waiting 10s..."
               sleep 10
             done
-            
-            # Cleanup old images
+
+            # Cleanup dangling images
             docker image prune -f
-            
-            # Remove old backups (keep last 5)
-            ls -t config/docker/docker-compose.dev.yml.backup.* 2>/dev/null | tail -n +6 | xargs -r rm
-            
+
             echo "Deployment completed successfully!"
           EOF
 
       - name: Verify deployment
         run: |
-          # Additional verification
-          sleep 30
-          curl -f http://${{ secrets.DROPLET_HOST }}/health || exit 1
+          sleep 15
+          curl -sf https://api.dev.tulink.xyz/health || exit 1
           echo "Deployment verification successful!"
 
       - name: Notify deployment status
         if: always()
         run: |
           if [ "${{ job.status }}" == "success" ]; then
-            echo "✅ Deployment to production successful!"
+            echo "✅ Deployment to dev successful!"
           else
-            echo "❌ Deployment failed!"
+            echo "❌ Deployment to dev failed!"
           fi
