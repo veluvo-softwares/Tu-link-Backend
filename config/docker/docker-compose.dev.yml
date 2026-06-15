@@ -75,22 +75,26 @@ services:
     image: redis:7-alpine
     container_name: tulink-redis-dev
     # No host port is published — Redis is reachable ONLY over the internal
-    # Docker network (tulink-network / local-dev) by the api service. For
-    # debugging use: docker exec -it tulink-redis-dev redis-cli -a "$REDIS_PASSWORD"
+    # Docker network (tulink-network / local-dev) by the api service. Debug with:
+    #   docker exec -it tulink-redis-dev sh -c 'redis-cli -a "$REDIS_PASSWORD" ...'
     expose:
       - "6379"
-    # REDISCLI_AUTH lets the healthcheck's `redis-cli ping` authenticate without
-    # putting the password on the command line (where it'd show in `ps`).
-    environment:
-      - REDISCLI_AUTH=${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+    # Read REDIS_PASSWORD from the SAME .env the app uses (container env), so the
+    # two always match. We expand it inside the container (not via Compose
+    # ${...} interpolation) so it works no matter where `docker compose` runs.
+    env_file:
+      - ../../.env
     volumes:
       - redis_dev_data:/data
-    # Require authentication so only the app — which supplies REDIS_PASSWORD
-    # from the repo-root .env — can read/write. The :? guard makes the deploy
-    # fail loudly if REDIS_PASSWORD is unset rather than silently running open.
-    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env} --appendonly yes --save "" --stop-writes-on-bgsave-error no
+    # Require authentication so only the app (which has the password) can
+    # read/write. `$$` is escaped so Compose passes a literal `$` and the
+    # container's shell expands REDIS_PASSWORD from its env. Fail loudly if it's
+    # empty rather than running open. `exec` keeps redis-server as PID 1.
+    command: >
+      sh -c 'test -n "$$REDIS_PASSWORD" || { echo "REDIS_PASSWORD must be set in .env"; exit 1; };
+      exec redis-server --requirepass "$$REDIS_PASSWORD" --appendonly yes --save "" --stop-writes-on-bgsave-error no'
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 3
