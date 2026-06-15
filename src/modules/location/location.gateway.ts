@@ -86,6 +86,11 @@ export class LocationGateway
       // Map socket to user in Redis
       await this.redisService.setSocketUser(client.id, userId);
 
+      // Join a per-user room so the backend can push user-scoped events (e.g.
+      // journey invites) to all of this user's connected sockets, regardless
+      // of which journey — if any — they're currently in.
+      await client.join(`user:${userId}`);
+
       console.log(`Client connected: ${client.id} (User: ${userId})`);
 
       // Send connection success
@@ -133,10 +138,9 @@ export class LocationGateway
           'DISCONNECTED',
         );
 
-        // Remove member position from RTDB
-        await this.firebaseService.removeMemberPosition(journeyId, userId);
-
-        // Notify other participants
+        // Notify other participants. The member's last cached position remains
+        // in Redis (5-min TTL) so peers keep seeing where they dropped off; the
+        // participant-disconnected event tells clients to mark them stale.
         this.server
           .to(`journey:${journeyId}`)
           .emit('participant-disconnected', {
@@ -179,6 +183,12 @@ export class LocationGateway
 
       // Add to Redis room mapping
       await this.redisService.addSocketToRoom(journeyId, client.id);
+
+      // Ensure this user is in the journey participant set used to build the
+      // latest-locations snapshot. The set is otherwise only seeded at journey
+      // start, so a member who joins the room later would be missing from
+      // everyone's snapshot.
+      await this.redisService.addJourneyParticipant(journeyId, userId);
 
       // Update participant connection status
       await this.participantService.updateConnectionStatus(
@@ -245,9 +255,6 @@ export class LocationGateway
         userId,
         'DISCONNECTED',
       );
-
-      // Remove member position from RTDB
-      await this.firebaseService.removeMemberPosition(journeyId, userId);
 
       // Clear from client data
       client.data.journeyId = null;
@@ -444,7 +451,10 @@ export class LocationGateway
         heading: payload.heading,
         speed: payload.speed,
         altitude: payload.altitude,
-        timestamp: result.sequenceNumber,
+        // Real epoch-ms timestamp so clients can compute freshness/staleness.
+        // (Previously this was the sequence number, which made every peer
+        // position look ~56 years old and therefore permanently "stale".)
+        timestamp: Date.now(),
         sequenceNumber: result.sequenceNumber,
         priority: result.priority,
         metadata: payload.metadata,
@@ -476,7 +486,9 @@ export class LocationGateway
       heading: payload.heading,
       speed: payload.speed,
       altitude: payload.altitude,
-      timestamp: result.sequenceNumber,
+      // Real epoch-ms timestamp (not the sequence number) so clients can
+      // compute freshness/staleness correctly.
+      timestamp: Date.now(),
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
       metadata: payload.metadata,
@@ -511,35 +523,18 @@ export class LocationGateway
   }
 
   /**
-   * Handle polling-based update (RTDB only, no WebSocket broadcast)
+   * Handle polling-based update — no WebSocket broadcast. The position is
+   * already cached in Redis by processLocationUpdate; clients poll for it.
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   private async handlePollingUpdate(
     client: Socket,
     payload: LocationUpdateDto,
     result: any,
   ): Promise<void> {
-    const userId = client.data.userId;
-
-    // Write directly to RTDB without WebSocket broadcast
-    if (result.shouldBroadcast) {
-      const locationUpdate = {
-        location: payload.location,
-        accuracy: payload.accuracy,
-        heading: payload.heading,
-        speed: payload.speed,
-        altitude: payload.altitude,
-        timestamp: result.sequenceNumber,
-        sequenceNumber: result.sequenceNumber,
-        priority: result.priority,
-        metadata: payload.metadata,
-      };
-
-      await this.firebaseService.updateMemberPosition(
-        payload.journeyId,
-        userId,
-        locationUpdate,
-      );
-    }
+    // No WebSocket broadcast under the polling strategy. The position is
+    // already cached in Redis by processLocationUpdate; clients fetch it via
+    // the REST poll endpoint below.
 
     // Send acknowledgment with polling instruction
     client.emit('location-update-ack', {
@@ -553,7 +548,7 @@ export class LocationGateway
     });
 
     this.logger.debug(
-      `Polling update stored in RTDB for journey ${payload.journeyId}`,
+      `Polling update cached in Redis for journey ${payload.journeyId}`,
       'LocationGateway',
     );
   }
@@ -664,6 +659,15 @@ export class LocationGateway
 
   broadcastParticipantAccepted(journeyId: string, data: object) {
     this.server.to(`journey:${journeyId}`).emit('participant-accepted', data);
+  }
+
+  /**
+   * Push a journey invite to all of the invited user's connected sockets so
+   * their invite list updates live. FCM covers the case where the user has no
+   * active socket (app backgrounded/closed).
+   */
+  broadcastJourneyInvite(invitedUserId: string, data: object) {
+    this.server.to(`user:${invitedUserId}`).emit('journey-invite', data);
   }
 
   /**
