@@ -115,30 +115,6 @@ export class PriorityService {
   }
 
   /**
-   * Check if battery-aware throttling should be applied
-   */
-  shouldThrottleForBattery(
-    update: LocationUpdate,
-    priority: Priority,
-  ): boolean {
-    const batteryLevel = update.metadata?.batteryLevel;
-
-    if (!batteryLevel) return false;
-
-    // Aggressive throttling below 20%
-    if (batteryLevel < 20) {
-      return priority === 'LOW' || priority === 'MEDIUM';
-    }
-
-    // Moderate throttling below 50%
-    if (batteryLevel < 50) {
-      return priority === 'LOW';
-    }
-
-    return false;
-  }
-
-  /**
    * Check for significant speed changes
    */
   private hasSignificantSpeedChange(

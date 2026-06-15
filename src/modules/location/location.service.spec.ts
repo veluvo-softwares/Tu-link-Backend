@@ -14,9 +14,10 @@ import { LagDetectionService } from './services/lag-detection.service';
 import { ArrivalDetectionService } from './services/arrival-detection.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 
-describe('LocationService - Hybrid RTDB/Firestore', () => {
+describe('LocationService - Redis/Firestore', () => {
   let service: LocationService;
   let firebaseService: jest.Mocked<FirebaseService>;
+  let redisService: jest.Mocked<RedisService>;
   let priorityService: jest.Mocked<PriorityService>;
   let sequenceService: jest.Mocked<SequenceService>;
   let lagDetectionService: jest.Mocked<LagDetectionService>;
@@ -55,9 +56,6 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
 
   beforeEach(async () => {
     const mockFirebaseService = {
-      setMemberPosition: jest.fn().mockResolvedValue(undefined),
-      removeMemberPosition: jest.fn().mockResolvedValue(undefined),
-      clearJourneyPositions: jest.fn().mockResolvedValue(undefined),
       firestore: {
         collection: jest.fn(() => ({
           doc: jest.fn(() => ({
@@ -126,7 +124,6 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
           useValue: {
             calculatePriority: jest.fn().mockReturnValue('MEDIUM'),
             shouldThrottle: jest.fn().mockReturnValue(false),
-            shouldThrottleForBattery: jest.fn().mockReturnValue(false),
           },
         },
         {
@@ -168,17 +165,18 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
 
     service = module.get<LocationService>(LocationService);
     firebaseService = module.get(FirebaseService);
+    redisService = module.get(RedisService);
     priorityService = module.get(PriorityService);
     sequenceService = module.get(SequenceService);
     lagDetectionService = module.get(LagDetectionService);
     arrivalDetectionService = module.get(ArrivalDetectionService);
   });
 
-  describe('processLocationUpdate - Hybrid Behavior', () => {
-    it('should await RTDB write before method returns', async () => {
-      const rtdbDelay = 100;
-      firebaseService.setMemberPosition.mockImplementation(
-        () => new Promise((resolve) => setTimeout(resolve, rtdbDelay)),
+  describe('processLocationUpdate - Redis/Firestore Behavior', () => {
+    it('should await Redis cache write before method returns', async () => {
+      const cacheDelay = 100;
+      redisService.cacheLocation.mockImplementation(
+        () => new Promise((resolve) => setTimeout(resolve, cacheDelay)),
       );
 
       const startTime = Date.now();
@@ -189,27 +187,25 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
       const endTime = Date.now();
 
       expect(result.success).toBe(true);
-      expect(endTime - startTime).toBeGreaterThanOrEqual(rtdbDelay);
+      expect(endTime - startTime).toBeGreaterThanOrEqual(cacheDelay);
 
       // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(firebaseService.setMemberPosition).toHaveBeenCalledWith(
+      expect(redisService.cacheLocation).toHaveBeenCalledWith(
         'journey-123',
-        'user-123',
+        'participant-789',
         expect.objectContaining({
-          lat: 40.7128,
-          lng: -74.006,
+          journeyId: 'journey-123',
+          participantId: 'participant-789',
+          location: expect.objectContaining({
+            latitude: 40.7128,
+            longitude: -74.006,
+          }),
           accuracy: 10,
           heading: 180,
           speed: 25,
           altitude: 100,
-          timestamp: 1640995200000,
-          userId: 'user-123',
           sequenceNumber: 42,
           priority: 'MEDIUM',
-          metadata: expect.objectContaining({
-            batteryLevel: 80,
-            isMoving: true,
-          }),
         }),
       );
     });
@@ -312,29 +308,24 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
       consoleSpy.mockRestore();
     });
 
-    it('should flatten DTO location structure correctly in RTDB payload', async () => {
+    it('should cache the LocationUpdate with nested location for snapshots', async () => {
       await service.processLocationUpdate('user-123', mockLocationDto);
 
-      // eslint-disable-next-line @typescript-eslint/unbound-method
-      expect(firebaseService.setMemberPosition).toHaveBeenCalledWith(
-        'journey-123',
-        'user-123',
-        expect.objectContaining({
-          lat: mockLocationDto.location.latitude,
-          lng: mockLocationDto.location.longitude,
-        }),
-      );
-
-      // Verify nested location object is NOT passed to RTDB
-      const rtdbCall = (firebaseService.setMemberPosition as jest.Mock).mock
-        .calls[0];
+      const cacheCall = (redisService.cacheLocation as jest.Mock).mock.calls[0];
       // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-      const payload = rtdbCall?.[2];
-      expect(payload).not.toHaveProperty('location');
-      expect(payload).not.toHaveProperty('location.latitude');
+      const cached = cacheCall?.[2];
+      expect(cached).toHaveProperty(
+        'location.latitude',
+        mockLocationDto.location.latitude,
+      );
+      expect(cached).toHaveProperty(
+        'location.longitude',
+        mockLocationDto.location.longitude,
+      );
+      expect(cached).toHaveProperty('participantId', 'participant-789');
     });
 
-    it('should preserve sub-service call order before RTDB write', async () => {
+    it('should preserve sub-service call order before cache write', async () => {
       const callOrder: string[] = [];
 
       sequenceService.getNextSequence.mockImplementation(() => {
@@ -363,8 +354,8 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
         });
       });
 
-      firebaseService.setMemberPosition.mockImplementation(() => {
-        callOrder.push('rtdb');
+      redisService.cacheLocation.mockImplementation(() => {
+        callOrder.push('cache');
         return Promise.resolve();
       });
 
@@ -373,7 +364,7 @@ describe('LocationService - Hybrid RTDB/Firestore', () => {
       expect(callOrder).toEqual([
         'priority',
         'sequence',
-        'rtdb',
+        'cache',
         'lag',
         'arrival',
       ]);

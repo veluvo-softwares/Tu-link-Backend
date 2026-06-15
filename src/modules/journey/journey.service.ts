@@ -143,19 +143,6 @@ export class JourneyService {
         updatedAt: FieldValue.serverTimestamp(),
       });
 
-    // Clean up RTDB positions after a delay
-    const cleanupDelayMs =
-      this.configService.get<number>('app.rtdbCleanupDelayMs') ?? 5000;
-    setTimeout(() => {
-      this.firebaseService
-        .clearJourneyPositions(journeyId)
-        .catch((err) =>
-          console.error(
-            `RTDB cleanup failed for journey ${journeyId}: ${err.message}`,
-          ),
-        );
-    }, cleanupDelayMs);
-
     // Clean up all Redis keys for this journey
     // Participant keys must be cleared before clearJourneyCache() removes the
     // participant set, so read the set first.
@@ -301,19 +288,6 @@ export class JourneyService {
         ),
       );
 
-    // Clean up RTDB positions after a delay
-    const cleanupDelayMs =
-      this.configService.get<number>('app.rtdbCleanupDelayMs') ?? 5000;
-    setTimeout(() => {
-      this.firebaseService
-        .clearJourneyPositions(journeyId)
-        .catch((err) =>
-          console.error(
-            `RTDB cleanup failed for journey ${journeyId}: ${err.message}`,
-          ),
-        );
-    }, cleanupDelayMs);
-
     await this.redisService.removeActiveJourney(journeyId);
 
     const cachedParticipantIds =
@@ -438,13 +412,22 @@ export class JourneyService {
       userId,
     );
 
-    // Create notification for the invited user
+    // Create notification for the invited user (persists + FCM push)
     await this.createInvitationNotification(
       journeyId,
       invitedUserId,
       userId,
       journey.name,
     );
+
+    // Real-time WS push to the invited user's connected sockets so their invite
+    // list updates live without a reload. FCM (above) covers the offline case.
+    this.locationGateway.broadcastJourneyInvite(invitedUserId, {
+      journeyId,
+      journeyName: journey.name,
+      invitedBy: userId,
+      timestamp: Date.now(),
+    });
   }
 
   async getUserPendingInvitations(userId: string): Promise<any[]> {
