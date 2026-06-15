@@ -31,24 +31,6 @@ import {
 import { Priority } from '../../types/priority.type';
 import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
-interface RTDBLocationData {
-  lat: number;
-  lng: number;
-  accuracy?: number;
-  heading?: number | null;
-  speed?: number | null;
-  altitude?: number | null;
-  timestamp: number;
-  userId: string;
-  sequenceNumber?: number;
-  priority?: string;
-  metadata?: {
-    batteryLevel?: number | null;
-    isMoving?: boolean | null;
-    statusChange?: boolean | string | null;
-  };
-}
-
 interface Journey {
   destination?: {
     latitude: number;
@@ -148,7 +130,9 @@ export class LocationService {
       leaderLocation,
     );
 
-    // 7. Check throttling
+    // 7. Check throttling. Battery-level throttling was intentionally removed:
+    // modern phones cope fine at low battery and we don't want to drop a
+    // member off the map just because their battery is low.
     const lastUpdateTime = lastLocation?.timestamp?.toMillis() || null;
     const shouldThrottle = this.priorityService.shouldThrottle(
       locationUpdateDto as LocationUpdate,
@@ -156,13 +140,7 @@ export class LocationService {
       lastUpdateTime,
     );
 
-    const shouldThrottleForBattery =
-      this.priorityService.shouldThrottleForBattery(
-        locationUpdateDto as LocationUpdate,
-        priority,
-      );
-
-    if (shouldThrottle || shouldThrottleForBattery) {
+    if (shouldThrottle) {
       return {
         success: false,
         sequenceNumber: 0,
@@ -184,31 +162,7 @@ export class LocationService {
       timestamp: Date.now(),
     };
 
-    // 10. Store in RTDB (primary live source) - awaited
-    const rtdbPayload = {
-      lat: locationUpdateDto.location.latitude,
-      lng: locationUpdateDto.location.longitude,
-      accuracy: locationUpdateDto.accuracy,
-      heading: locationUpdateDto.heading ?? null,
-      speed: locationUpdateDto.speed ?? null,
-      altitude: locationUpdateDto.altitude ?? null,
-      timestamp: locationUpdateDto.timestamp,
-      userId,
-      sequenceNumber,
-      priority,
-      metadata: {
-        batteryLevel: locationUpdateDto.metadata?.batteryLevel ?? null,
-        isMoving: locationUpdateDto.metadata?.isMoving ?? null,
-        statusChange: locationUpdateDto.metadata?.statusChange ?? null,
-      },
-    };
-    await this.firebaseService.setMemberPosition(
-      journeyId,
-      userId,
-      rtdbPayload,
-    );
-
-    // 11. Store in Firestore (persistence) - fire-and-forget
+    // 10. Store in Firestore (persistence) - fire-and-forget
     this.persistToFirestore(locationUpdate).catch((err: Error) =>
       console.error(
         `Firestore persist failed for user ${userId}: ${err.message}`,
@@ -216,7 +170,9 @@ export class LocationService {
       ),
     );
 
-    // 12. Update Redis cache (hot data)
+    // 11. Update Redis cache — the single source of truth for live convoy
+    // positions and the snapshot returned to clients on join. Must be awaited
+    // so a join-time snapshot read immediately after sees this position.
     await this.redisService.cacheLocation(
       journeyId,
       participant.id,
@@ -392,39 +348,10 @@ export class LocationService {
 
     // Get journey details for destination information
     const journey = await this.journeyService.findById(journeyId);
-    let locations: Record<string, LocationUpdate> = {};
+    const locations: Record<string, LocationUpdate> = {};
 
-    // Strategy 1: Try RTDB first (most recent real-time data)
-    try {
-      const rtdbData =
-        await this.firebaseService.getJourneyRTDBSnapshot(journeyId);
-      if (rtdbData && Object.keys(rtdbData).length > 0) {
-        console.log(
-          `RTDB: Found ${Object.keys(rtdbData).length} real-time locations for journey ${journeyId}`,
-        );
-        locations = await this.transformRTDBToLocationUpdates(
-          journeyId,
-          rtdbData,
-        );
-
-        // If we got RTDB data, use it and skip Redis fallback
-        if (Object.keys(locations).length > 0) {
-          return this.buildLatestLocationsResponse(locations, journey);
-        }
-      } else {
-        console.log(
-          `RTDB: No active participants found for journey ${journeyId}`,
-        );
-      }
-    } catch (error) {
-      console.error(
-        `RTDB read failed for journey ${journeyId}, falling back to Redis:`,
-        error,
-      );
-    }
-
-    // Strategy 2: Fallback to Redis cache (existing behavior)
-    console.log(`Falling back to Redis cache for journey ${journeyId}`);
+    // Read the latest cached position for each participant from Redis — the
+    // single source of truth for live convoy positions.
     const participants =
       await this.redisService.getJourneyParticipants(journeyId);
 
@@ -629,126 +556,30 @@ export class LocationService {
   }
 
   /**
-   * Transform RTDB data structure to LocationUpdate format
-   * RTDB format: { userId: { lat, lng, accuracy, heading, speed, timestamp, ... } }
-   * API format: { participantId: LocationUpdate }
-   */
-  private async transformRTDBToLocationUpdates(
-    journeyId: string,
-    rtdbData: Record<string, Record<string, unknown>>,
-  ): Promise<Record<string, LocationUpdate>> {
-    const locations: Record<string, LocationUpdate> = {};
-
-    // Get participants to map userId to participantId
-    const participants =
-      await this.participantService.getJourneyParticipants(journeyId);
-    const userToParticipantMap = new Map<string, string>();
-    participants.forEach((p) => userToParticipantMap.set(p.userId, p.id));
-
-    for (const [userId, data] of Object.entries(rtdbData)) {
-      const participantId = userToParticipantMap.get(userId);
-      if (!participantId || !data) continue;
-
-      // Cast to our expected interface for type safety
-      const locationData = data as unknown as RTDBLocationData;
-
-      locations[participantId] = {
-        journeyId,
-        participantId,
-        location: {
-          latitude: locationData.lat,
-          longitude: locationData.lng,
-        },
-        accuracy: locationData.accuracy || 0,
-        heading: locationData.heading || null,
-        speed: locationData.speed || null,
-        altitude: locationData.altitude || null,
-        timestamp: locationData.timestamp,
-        sequenceNumber: locationData.sequenceNumber || 0,
-        priority: locationData.priority || 'LOW',
-        metadata: {
-          batteryLevel: locationData.metadata?.batteryLevel || null,
-          isMoving: locationData.metadata?.isMoving || null,
-          statusChange:
-            typeof locationData.metadata?.statusChange === 'string'
-              ? locationData.metadata?.statusChange === 'true'
-              : locationData.metadata?.statusChange || false,
-        },
-      } as LocationUpdate;
-    }
-
-    return locations;
-  }
-
-  /**
-   * Get locations updated since a specific timestamp (for polling strategy)
+   * Get locations updated since a specific timestamp (for polling strategy).
+   * Reads from Redis (the live source) and filters by timestamp.
    */
   async getLocationsSince(
     journeyId: string,
     sinceTimestamp: number,
     userId: string,
   ): Promise<LatestLocationsResponse> {
-    try {
-      // Verify user is a participant
-      const isParticipant = await this.participantService.isParticipant(
-        journeyId,
-        userId,
-      );
-      if (!isParticipant) {
-        throw new ForbiddenException(
-          'User is not a participant in this journey',
-        );
+    // getLatestLocations performs the participant check and journey lookup.
+    const latest = await this.getLatestLocations(journeyId, userId);
+
+    const filteredParticipants: Record<string, LocationUpdate> = {};
+    for (const [participantId, location] of Object.entries(
+      latest.participants,
+    )) {
+      if (location.timestamp > sinceTimestamp) {
+        filteredParticipants[participantId] = location;
       }
-
-      // Get journey destination info
-      const journey = await this.journeyService.findById(journeyId);
-
-      // Try RTDB first
-      const rtdbLocations = await this.firebaseService.getLocationsSince(
-        journeyId,
-        sinceTimestamp,
-      );
-
-      if (Object.keys(rtdbLocations).length > 0) {
-        // Transform RTDB data to LocationUpdate format
-        const locations = await this.transformRTDBToLocationUpdates(
-          journeyId,
-          rtdbLocations,
-        );
-
-        return {
-          participants: locations,
-          destination: journey?.destination
-            ? {
-                latitude: journey.destination.latitude,
-                longitude: journey.destination.longitude,
-              }
-            : undefined,
-          destinationAddress: journey?.destinationAddress,
-        };
-      }
-
-      // Fallback to Redis if RTDB is empty
-      const redisLocations = await this.getLatestLocations(journeyId, userId);
-
-      // Filter Redis locations by timestamp
-      const filteredParticipants: Record<string, LocationUpdate> = {};
-      for (const [participantId, location] of Object.entries(
-        redisLocations.participants,
-      )) {
-        if (location.timestamp > sinceTimestamp) {
-          filteredParticipants[participantId] = location;
-        }
-      }
-
-      return {
-        participants: filteredParticipants,
-        destination: redisLocations.destination,
-        destinationAddress: redisLocations.destinationAddress,
-      };
-    } catch (error) {
-      console.error('Error getting locations since timestamp:', error);
-      throw error;
     }
+
+    return {
+      participants: filteredParticipants,
+      destination: latest.destination,
+      destinationAddress: latest.destinationAddress,
+    };
   }
 }

@@ -85,7 +85,7 @@ export class LocationController {
   }
 
   /**
-   * Polling endpoint for large journeys using RTDB polling strategy
+   * Polling endpoint for large journeys using the Redis polling strategy
    * Returns locations updated since the specified timestamp
    */
   @Get('journeys/:journeyId/poll')
