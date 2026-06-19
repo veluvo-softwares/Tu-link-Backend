@@ -11,12 +11,16 @@ services:
       - PORT=3000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
     env_file:
       - ../../.env
     expose:
       - "3000"
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - tulink-network
@@ -47,12 +51,16 @@ services:
       - PORT=3000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
     env_file:
       - ../../.env
     ports:
       - "3001:3000"
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     networks:
       - local-dev
@@ -103,6 +111,32 @@ services:
       - local-dev       # Local profile
     restart: unless-stopped
 
+  # Postgres + PostGIS Database - Development
+  postgres:
+    image: postgis/postgis:16-3.4
+    container_name: tulink-postgres-dev
+    # Deliberate deviation from redis (which publishes NO host port): Postgres is
+    # bound to LOCALHOST ONLY so the host can run drizzle-kit migrations and
+    # pg_dump backups, while the public internet still cannot reach it. The app
+    # connects over the internal Docker network by service name (`postgres`).
+    ports:
+      - "127.0.0.1:5432:5432"
+    # The postgis image reads POSTGRES_USER/POSTGRES_PASSWORD/POSTGRES_DB from
+    # container env. Use the SAME .env the app uses so credentials always match.
+    env_file:
+      - ../../.env
+    volumes:
+      - postgres_dev_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - tulink-network  # Server profile
+      - local-dev       # Local profile
+    restart: unless-stopped
+
 networks:
   tulink-network:
     driver: bridge
@@ -115,4 +149,6 @@ networks:
 
 volumes:
   redis_dev_data:
+    driver: local
+  postgres_dev_data:
     driver: local
