@@ -9,8 +9,11 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import {
+  LocationRecord,
+  LocationRepository,
+} from '../../database/repositories/location.repository';
 import { JourneyService } from '../journey/journey.service';
 import { ParticipantService } from '../journey/services/participant.service';
 import { PriorityService } from './services/priority.service';
@@ -29,7 +32,6 @@ import {
   LatestLocationsResponse,
 } from '../../shared/interfaces/location.interface';
 import { Priority } from '../../types/priority.type';
-import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
 interface Journey {
   destination?: {
@@ -42,7 +44,7 @@ interface Journey {
 @Injectable()
 export class LocationService {
   constructor(
-    private firebaseService: FirebaseService,
+    private locationRepository: LocationRepository,
     private redisService: RedisService,
     @Inject(forwardRef(() => JourneyService))
     private journeyService: JourneyService,
@@ -162,10 +164,10 @@ export class LocationService {
       timestamp: Date.now(),
     };
 
-    // 10. Store in Firestore (persistence) - fire-and-forget
-    this.persistToFirestore(locationUpdate).catch((err: Error) =>
+    // 10. Persist to Postgres (history) - fire-and-forget
+    this.persistLocation(locationUpdate).catch((err: Error) =>
       console.error(
-        `Firestore persist failed for user ${userId}: ${err.message}`,
+        `Location persist failed for user ${userId}: ${err.message}`,
         err.stack,
       ),
     );
@@ -221,38 +223,49 @@ export class LocationService {
   }
 
   /**
-   * Persists location to Firestore for history and analytics.
+   * Persists location to Postgres for history and analytics.
    * Called asynchronously — failures are logged but do not affect the live update response.
    */
-  private async persistToFirestore(update: LocationUpdate): Promise<void> {
-    const locationRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(update.journeyId)
-      .collection('locations')
-      .doc();
-
-    const locationData = {
+  private async persistLocation(update: LocationUpdate): Promise<void> {
+    await this.locationRepository.append({
       journeyId: update.journeyId,
       participantId: update.participantId,
-      location: new GeoPoint(
-        update.location.latitude,
-        update.location.longitude,
-      ),
+      location: update.location,
       accuracy: update.accuracy,
       heading: update.heading,
       speed: update.speed,
       altitude: update.altitude,
-
-      timestamp: FieldValue.serverTimestamp() as any,
       sequenceNumber: update.sequenceNumber || 0,
       priority: update.priority || 'LOW',
       metadata: {
         batteryLevel: update.metadata?.batteryLevel,
         isMoving: update.metadata?.isMoving || false,
       },
-    };
+    });
+  }
 
-    await locationRef.set(locationData);
+  // Maps a Postgres location row to the API LocationHistory shape. createdAt
+  // becomes `timestamp` (ISO on serialization); participantId doubles as userId
+  // (invariant A).
+  private recordToHistory(record: LocationRecord): LocationHistory {
+    return {
+      id: String(record.id),
+      journeyId: record.journeyId,
+      participantId: record.participantId,
+      userId: record.participantId,
+      location: record.location,
+      accuracy: record.accuracy ?? 0,
+      heading: record.heading ?? undefined,
+      speed: record.speed ?? undefined,
+      altitude: record.altitude ?? undefined,
+      timestamp: record.createdAt,
+      sequenceNumber: record.sequenceNumber ?? 0,
+      priority: record.priority,
+      metadata: {
+        batteryLevel: record.metadata?.batteryLevel,
+        isMoving: record.metadata?.isMoving ?? false,
+      },
+    } as unknown as LocationHistory;
   }
 
   /**
@@ -274,38 +287,17 @@ export class LocationService {
     // Get journey details for destination information
     const journey = await this.journeyService.findById(journeyId);
 
-    // Get all participants in the journey
-    const participants =
-      await this.participantService.getJourneyParticipants(journeyId);
-
-    // Get latest location for each participant
-    const latestLocations: LocationHistory[] = [];
-
-    for (const participant of participants) {
-      const snapshot = await this.firebaseService.firestore
-        .collection('journeys')
-        .doc(journeyId)
-        .collection('locations')
-        .where('participantId', '==', participant.id)
-        .orderBy('timestamp', 'desc')
-        .limit(1)
-        .get();
-
-      if (!snapshot.empty) {
-        const locationData = snapshot.docs[0].data();
-        latestLocations.push({
-          id: snapshot.docs[0].id,
-          ...locationData,
-        } as LocationHistory);
-      }
-    }
-
-    // Sort by timestamp descending (most recent first)
-    latestLocations.sort((a, b) => {
-      const aTime = a.timestamp?.toMillis?.() || 0;
-      const bTime = b.timestamp?.toMillis?.() || 0;
-      return bTime - aTime;
-    });
+    // Latest location per participant in a single query (DISTINCT ON), most
+    // recent first.
+    const latestRecords =
+      await this.locationRepository.getLatestPerParticipant(journeyId);
+    const latestLocations: LocationHistory[] = latestRecords
+      .map((r) => this.recordToHistory(r))
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp as unknown as string).getTime() -
+          new Date(a.timestamp as unknown as string).getTime(),
+      );
 
     // Prepare response with destination coordinates
     const response: {
@@ -415,19 +407,12 @@ export class LocationService {
       throw new ForbiddenException('Not a participant of this journey');
     }
 
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('locations')
-      .where('participantId', '==', participantId)
-      .orderBy('timestamp', 'desc')
-      .limit(limit)
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as LocationHistory[];
+    const records = await this.locationRepository.getParticipantHistory(
+      journeyId,
+      participantId,
+      limit,
+    );
+    return records.map((r) => this.recordToHistory(r));
   }
 
   /**
@@ -476,18 +461,11 @@ export class LocationService {
     }
 
     // Get all locations after the specified sequence number
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('locations')
-      .where('sequenceNumber', '>', fromSequence)
-      .orderBy('sequenceNumber', 'asc')
-      .get();
-
-    return snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as LocationHistory[];
+    const records = await this.locationRepository.getSinceSequence(
+      journeyId,
+      fromSequence,
+    );
+    return records.map((r) => this.recordToHistory(r));
   }
 
   /**
@@ -535,24 +513,11 @@ export class LocationService {
     journeyId: string,
     participantId: string,
   ): Promise<LocationHistory | null> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('locations')
-      .where('participantId', '==', participantId)
-      .orderBy('timestamp', 'desc')
-      .limit(1)
-      .get();
-
-    if (snapshot.empty) {
-      return null;
-    }
-
-    const data = snapshot.docs[0].data();
-    return {
-      id: snapshot.docs[0].id,
-      ...data,
-    } as LocationHistory;
+    const record = await this.locationRepository.getLastForParticipant(
+      journeyId,
+      participantId,
+    );
+    return record ? this.recordToHistory(record) : null;
   }
 
   /**
