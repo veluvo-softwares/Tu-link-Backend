@@ -1,18 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FirebaseService } from '../../../shared/firebase/firebase.service';
-import { ParticipantService } from '../../journey/services/participant.service';
+import { ParticipantRepository } from '../../../database/repositories/participant.repository';
 import { LocationUpdate } from '../../../shared/interfaces/location.interface';
 import { Journey } from '../../../shared/interfaces/journey.interface';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
-import { FieldValue, DocumentSnapshot } from 'firebase-admin/firestore';
-
-interface ParticipantData {
-  status: string;
-  role: string;
-  userId: string;
-  [key: string]: unknown;
-}
 
 export interface ArrivalResult {
   arrived: boolean;
@@ -25,8 +16,7 @@ export interface ArrivalResult {
 @Injectable()
 export class ArrivalDetectionService {
   constructor(
-    private firebaseService: FirebaseService,
-    private participantService: ParticipantService,
+    private participantRepository: ParticipantRepository,
     private configService: ConfigService,
   ) {}
 
@@ -95,26 +85,20 @@ export class ArrivalDetectionService {
     participantId: string,
     journeyId: string,
   ): Promise<{ alreadyArrived: boolean }> {
-    const participantDoc = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(participantId)
-      .get();
+    const participant = await this.participantRepository.findOne(
+      journeyId,
+      participantId,
+    );
 
-    if (!participantDoc.exists) {
+    if (!participant) {
       return { alreadyArrived: false };
     }
 
-    const participant = participantDoc.data() as ParticipantData | undefined;
-    if (participant?.status === 'ARRIVED') {
+    if (participant.status === 'ARRIVED') {
       return { alreadyArrived: true };
     }
 
-    await participantDoc.ref.update({
-      status: 'ARRIVED',
-      arrivedAt: FieldValue.serverTimestamp(),
-    });
+    await this.participantRepository.markArrived(journeyId, participantId);
 
     return { alreadyArrived: false };
   }
@@ -126,31 +110,23 @@ export class ArrivalDetectionService {
   async getArrivalCounts(
     journeyId: string,
   ): Promise<{ arrivedCount: number; totalCount: number }> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .where('status', 'in', ['ACTIVE', 'ACCEPTED', 'ARRIVED'])
-      .get();
-
-    const docs = snapshot.docs.map(
-      (d: DocumentSnapshot) => d.data() as ParticipantData,
+    const participants =
+      await this.participantRepository.findByJourney(journeyId);
+    const relevant = participants.filter((p) =>
+      ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(p.status),
     );
-    const arrivedCount = docs.filter((p) => p.status === 'ARRIVED').length;
-    const totalCount = docs.length;
+    const arrivedCount = relevant.filter((p) => p.status === 'ARRIVED').length;
+    const totalCount = relevant.length;
 
     return { arrivedCount, totalCount };
   }
 
   async getArrivedParticipants(journeyId: string): Promise<string[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .where('status', '==', 'ARRIVED')
-      .get();
-
-    return snapshot.docs.map((doc: DocumentSnapshot) => doc.id);
+    const participants =
+      await this.participantRepository.findByJourney(journeyId);
+    return participants
+      .filter((p) => p.status === 'ARRIVED')
+      .map((p) => p.userId);
   }
 
   async allParticipantsArrived(journeyId: string): Promise<boolean> {

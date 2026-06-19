@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FirebaseService } from '../../../shared/firebase/firebase.service';
 import { RedisService } from '../../../shared/redis/redis.service';
+import { LagAlertRepository } from '../../../database/repositories/lag-alert.repository';
 import { MapsService } from '../../maps/services/maps.service';
 import {
   LocationUpdate,
@@ -10,29 +10,13 @@ import {
 import { Journey } from '../../../shared/interfaces/journey.interface';
 import { LagAlert } from '../../../shared/interfaces/notification.interface';
 import { LagSeverity } from '../../../types/notification.type';
+import { LatLng } from '../../../database/schema/columns/geography-point';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
-import {
-  FieldValue,
-  GeoPoint,
-  DocumentSnapshot,
-  Timestamp,
-} from 'firebase-admin/firestore';
-
-interface LagAlertData {
-  journeyId: string;
-  participantId: string;
-  distanceFromLeader: number;
-  leaderLocation: GeoPoint;
-  followerLocation: GeoPoint;
-  severity: LagSeverity;
-  isActive: boolean;
-  createdAt: Timestamp;
-}
 
 @Injectable()
 export class LagDetectionService {
   constructor(
-    private firebaseService: FirebaseService,
+    private lagAlertRepository: LagAlertRepository,
     private redisService: RedisService,
     private mapsService: MapsService,
     private configService: ConfigService,
@@ -78,14 +62,14 @@ export class LagDetectionService {
         journeyId: journey.id,
         participantId: followerUpdate.participantId,
         distanceFromLeader: distance,
-        leaderLocation: new GeoPoint(
-          leaderLocation.location.latitude,
-          leaderLocation.location.longitude,
-        ),
-        followerLocation: new GeoPoint(
-          followerUpdate.location.latitude,
-          followerUpdate.location.longitude,
-        ),
+        leaderLocation: {
+          latitude: leaderLocation.location.latitude,
+          longitude: leaderLocation.location.longitude,
+        },
+        followerLocation: {
+          latitude: followerUpdate.location.latitude,
+          longitude: followerUpdate.location.longitude,
+        },
         severity,
       });
     }
@@ -106,36 +90,26 @@ export class LagDetectionService {
   }
 
   /**
-   * Create a new lag alert in Firestore
+   * Create a new lag alert in Postgres
    */
   private async createLagAlert(data: {
     journeyId: string;
     participantId: string;
     distanceFromLeader: number;
-    leaderLocation: GeoPoint;
-    followerLocation: GeoPoint;
+    leaderLocation: LatLng;
+    followerLocation: LatLng;
     severity: LagSeverity;
   }): Promise<LagAlert> {
-    const alertRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(data.journeyId)
-      .collection('lag_alerts')
-      .doc();
-
-    const alertData: LagAlertData = {
+    const alert = await this.lagAlertRepository.create({
       journeyId: data.journeyId,
       participantId: data.participantId,
       distanceFromLeader: data.distanceFromLeader,
       leaderLocation: data.leaderLocation,
       followerLocation: data.followerLocation,
       severity: data.severity,
-      isActive: true,
-      createdAt: FieldValue.serverTimestamp() as Timestamp,
-    };
+    });
 
-    await alertRef.set(alertData);
-
-    return { id: alertRef.id, ...alertData } as LagAlert;
+    return alert as unknown as LagAlert;
   }
 
   /**
@@ -145,52 +119,24 @@ export class LagDetectionService {
     journeyId: string,
     participantId: string,
   ): Promise<void> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('lag_alerts')
-      .where('participantId', '==', participantId)
-      .where('isActive', '==', true)
-      .get();
-
-    const updates = snapshot.docs.map((doc: DocumentSnapshot) =>
-      doc.ref.update({
-        isActive: false,
-        resolvedAt: FieldValue.serverTimestamp(),
-      }),
+    await this.lagAlertRepository.resolveActiveForParticipant(
+      journeyId,
+      participantId,
     );
-
-    await Promise.all(updates);
   }
 
   /**
    * Get active lag alerts for a journey
    */
   async getActiveLagAlerts(journeyId: string): Promise<LagAlert[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('lag_alerts')
-      .where('isActive', '==', true)
-      .get();
-
-    return snapshot.docs.map((doc: DocumentSnapshot) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as LagAlert[];
+    const alerts = await this.lagAlertRepository.getActive(journeyId);
+    return alerts as unknown as LagAlert[];
   }
 
   /**
    * Acknowledge a lag alert (mark as seen by user)
    */
   async acknowledgeLagAlert(alertId: string, journeyId: string): Promise<void> {
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('lag_alerts')
-      .doc(alertId)
-      .update({
-        acknowledgedAt: FieldValue.serverTimestamp(),
-      });
+    await this.lagAlertRepository.acknowledge(alertId, journeyId);
   }
 }
