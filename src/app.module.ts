@@ -15,6 +15,7 @@ import databaseConfig from './config/database.config';
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
+import { DatabaseModule } from './database/database.module';
 import { LoggerModule } from './shared/logger/logger.module';
 
 // Feature modules
@@ -43,6 +44,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     LoggerModule,
     FirebaseModule,
     RedisModule,
+    DatabaseModule,
     // Feature modules
     AuthModule,
     JourneyModule,
