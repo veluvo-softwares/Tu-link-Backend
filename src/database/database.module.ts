@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import databaseConfig from '../config/database.config';
 import { DatabaseService } from './database.service';
+import { AnalyticsRepository } from './repositories/analytics.repository';
 import { FcmTokenRepository } from './repositories/fcm-token.repository';
 import { JourneyRepository } from './repositories/journey.repository';
 import { LagAlertRepository } from './repositories/lag-alert.repository';
@@ -18,6 +19,7 @@ const repositories = [
   LagAlertRepository,
   NotificationRepository,
   FcmTokenRepository,
+  AnalyticsRepository,
 ];
 
 @Global()
