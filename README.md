@@ -45,7 +45,12 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
    - API Health: http://localhost:3001/health (local profile maps host 3001 → 3000)
    - Swagger Docs: http://localhost:3001/api
    - Postgres: 127.0.0.1:5432 (localhost only)
-   - Redis: internal-only (no host port)
+   - Redis: 127.0.0.1:6380 (localhost only; container port 6379)
+
+   > Both Postgres and Redis are bound to localhost only, so you can run the app
+   > on the host with hot-reload (`npm run start:dev`) against the same data
+   > stores the Dockerized app uses. They remain password-protected and
+   > unreachable from the public internet.
 
 ### Deploy Updates
 ```bash
