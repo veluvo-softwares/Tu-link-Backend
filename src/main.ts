@@ -4,7 +4,6 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
-import { TimestampConversionInterceptor } from './common/interceptors/timestamp-conversion.interceptor';
 import { LoggerService } from './shared/logger/logger.service';
 
 async function bootstrap() {
@@ -22,11 +21,9 @@ async function bootstrap() {
   // Global exception filter for standardized error responses
   app.useGlobalFilters(new HttpExceptionFilter(logger));
 
-  // Global interceptor to convert Firestore Timestamps to ISO 8601 strings
-  // This MUST run before ResponseInterceptor
-  app.useGlobalInterceptors(new TimestampConversionInterceptor());
-
-  // Global response interceptor for standardized success responses
+  // Global response interceptor for standardized success responses.
+  // (Postgres timestamptz columns serialize to ISO 8601 natively, so the
+  // former Firestore Timestamp conversion interceptor is no longer needed.)
   app.useGlobalInterceptors(new ResponseInterceptor());
 
   // Global validation pipe
