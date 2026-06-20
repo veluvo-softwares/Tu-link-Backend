@@ -145,6 +145,17 @@ export class LocationRepository {
     return rows.map(toRecord);
   }
 
+  // All locations for a journey, oldest first — used for analytics (distance,
+  // speed, route). High-write table, so this is an end-of-journey read.
+  async getAllForJourney(journeyId: string): Promise<LocationRecord[]> {
+    const rows = await this.db
+      .select(this.selection())
+      .from(locations)
+      .where(eq(locations.journeyId, journeyId))
+      .orderBy(asc(locations.createdAt));
+    return rows.map(toRecord);
+  }
+
   // Resync: everything after a sequence number, ascending.
   async getSinceSequence(
     journeyId: string,

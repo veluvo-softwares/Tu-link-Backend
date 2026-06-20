@@ -119,6 +119,15 @@ export class LagAlertRepository {
       );
   }
 
+  // All alerts for a journey (active or not) — used for analytics.
+  async getByJourney(journeyId: string): Promise<LagAlertRecord[]> {
+    const rows = await this.db
+      .select(this.selection())
+      .from(lagAlerts)
+      .where(eq(lagAlerts.journeyId, journeyId));
+    return rows.map(toRecord);
+  }
+
   async getActive(journeyId: string): Promise<LagAlertRecord[]> {
     const rows = await this.db
       .select(this.selection())
