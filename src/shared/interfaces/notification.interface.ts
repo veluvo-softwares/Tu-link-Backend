@@ -1,4 +1,3 @@
-import { Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import { NotificationType, LagSeverity } from '../../types/notification.type';
 
 export interface Notification {
@@ -10,8 +9,8 @@ export interface Notification {
   body: string;
   data: Record<string, any>;
   read: boolean;
-  createdAt: Timestamp;
-  readAt?: Timestamp;
+  createdAt: Date;
+  readAt?: Date;
 }
 
 export interface LagAlert {
@@ -19,11 +18,11 @@ export interface LagAlert {
   journeyId: string;
   participantId: string;
   distanceFromLeader: number;
-  leaderLocation: GeoPoint;
-  followerLocation: GeoPoint;
+  leaderLocation: { latitude: number; longitude: number };
+  followerLocation: { latitude: number; longitude: number };
   severity: LagSeverity;
   isActive: boolean;
-  createdAt: Timestamp;
-  resolvedAt?: Timestamp;
-  acknowledgedAt?: Timestamp;
+  createdAt: Date;
+  resolvedAt?: Date;
+  acknowledgedAt?: Date;
 }

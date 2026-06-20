@@ -135,7 +135,9 @@ export class LocationService {
     // 7. Check throttling. Battery-level throttling was intentionally removed:
     // modern phones cope fine at low battery and we don't want to drop a
     // member off the map just because their battery is low.
-    const lastUpdateTime = lastLocation?.timestamp?.toMillis() || null;
+    const lastUpdateTime = lastLocation
+      ? lastLocation.timestamp.getTime()
+      : null;
     const shouldThrottle = this.priorityService.shouldThrottle(
       locationUpdateDto as LocationUpdate,
       priority,

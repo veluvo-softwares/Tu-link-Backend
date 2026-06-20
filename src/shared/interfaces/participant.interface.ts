@@ -1,4 +1,3 @@
-import { Timestamp } from 'firebase-admin/firestore';
 import {
   ParticipantRole,
   ParticipantStatus,
@@ -11,10 +10,11 @@ export interface Participant {
   journeyId: string;
   role: ParticipantRole;
   status: ParticipantStatus;
-  joinedAt?: Timestamp;
-  leftAt?: Timestamp;
+  joinedAt?: Date;
+  leftAt?: Date;
   invitedBy: string;
-  lastSeenAt?: Timestamp;
+  lastSeenAt?: Date;
+  arrivedAt?: Date;
   connectionStatus: ConnectionStatus;
   displayName?: string;
   deviceInfo?: {

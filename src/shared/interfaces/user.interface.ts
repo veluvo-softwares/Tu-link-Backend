@@ -1,5 +1,3 @@
-import { Timestamp } from 'firebase-admin/firestore';
-
 export interface User {
   id: string;
   email: string;
@@ -8,6 +6,6 @@ export interface User {
   emailVerified?: boolean;
   phoneVerified?: boolean;
   isGuest?: boolean;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
 }
