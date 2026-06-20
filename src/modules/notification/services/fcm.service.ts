@@ -109,14 +109,30 @@ export class FcmService {
           ...message,
         });
 
-      // Track failed tokens for cleanup
+      // Track failed tokens for cleanup. Only tokens that FCM reports as
+      // permanently invalid are removed — transient failures (e.g. server
+      // errors, rate limits) must be preserved so the device isn't silently
+      // unsubscribed.
+      // Only codes that mean THIS token can never receive a message. Excludes
+      // config/payload errors (mismatched-credential, third-party-auth-error,
+      // payload-size-limit-exceeded) which affect the request, not the token,
+      // and would otherwise unsubscribe healthy devices.
+      const permanentFailureCodes = new Set([
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-argument',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-recipient',
+        'messaging/invalid-package-name',
+      ]);
       const failedTokens: string[] = [];
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
-          failedTokens.push(tokens[idx]);
           this.logger.warn(
             `Failed to send to token ${tokens[idx]}: ${resp.error?.message}`,
           );
+          if (resp.error && permanentFailureCodes.has(resp.error.code)) {
+            failedTokens.push(tokens[idx]);
+          }
         }
       });
 

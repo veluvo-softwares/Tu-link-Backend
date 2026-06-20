@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import {
   ConnectionStatus,
   ParticipantRole,
@@ -80,6 +80,12 @@ export class ParticipantRepository {
           role: input.role,
           status: input.status,
           joinedAt: input.setJoinedAt ? sql`now()` : null,
+          // Re-invitation overwrites a prior DECLINED/LEFT/ARRIVED row, so the
+          // stale lifecycle timestamps and connection state must be cleared.
+          leftAt: null,
+          arrivedAt: null,
+          lastSeenAt: null,
+          connectionStatus: 'DISCONNECTED',
         },
       })
       .returning();
@@ -194,6 +200,28 @@ export class ParticipantRepository {
       status: 'ARRIVED',
       arrivedAt: sql`now()`,
     });
+  }
+
+  // Atomic arrival transition: only flips a not-yet-ARRIVED participant. Returns
+  // the row when this call performed the update, null when it was already
+  // ARRIVED (or the participant does not exist) — lets callers avoid the
+  // check-then-update race that would fire duplicate arrival side effects.
+  async markArrivedIfNotArrived(
+    journeyId: string,
+    userId: string,
+  ): Promise<ParticipantRecord | null> {
+    const [row] = await this.db
+      .update(participants)
+      .set({ status: 'ARRIVED', arrivedAt: sql`now()` })
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          eq(participants.userId, userId),
+          ne(participants.status, 'ARRIVED'),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
   }
 
   setConnectionStatus(

@@ -3,7 +3,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -69,15 +71,29 @@ export class AuthService {
       const userRecord =
         await this.firebaseService.auth.createUser(createUserPayload);
 
-      // Create the Postgres user row (PK = Firebase UID; invariant A)
-      await this.usersRepository.create({
-        id: userRecord.uid,
-        email: registerDto.email,
-        displayName: registerDto.displayName,
-        phoneNumber: registerDto.phoneNumber,
-        emailVerified: false,
-        phoneVerified: false,
-      });
+      // Create the Postgres user row (PK = Firebase UID; invariant A). If this
+      // fails we must delete the just-created Firebase user, otherwise a Firebase
+      // identity would exist with no corresponding DB row (orphan).
+      try {
+        await this.usersRepository.create({
+          id: userRecord.uid,
+          email: registerDto.email,
+          displayName: registerDto.displayName,
+          phoneNumber: registerDto.phoneNumber,
+          emailVerified: false,
+          phoneVerified: false,
+        });
+      } catch (dbError) {
+        await this.firebaseService.auth
+          .deleteUser(userRecord.uid)
+          .catch((cleanupError) =>
+            console.error(
+              `Failed to roll back Firebase user ${userRecord.uid} after DB write failure:`,
+              cleanupError,
+            ),
+          );
+        throw dbError;
+      }
 
       // Sign in the user to get an ID token and refresh token
       const signInResponse = await axios.post(
@@ -211,6 +227,16 @@ export class AuthService {
         },
       };
     } catch (error) {
+      // A missing Postgres profile (or any deliberate Nest HTTP error) must
+      // propagate as-is — don't let the Firebase-REST handling below collapse
+      // it into a generic 401.
+      if (
+        error instanceof NotFoundException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+
       if (error.response?.data?.error) {
         const firebaseError = error.response.data.error;
 
@@ -276,11 +302,14 @@ export class AuthService {
       await this.usersRepository.update(uid, {
         emailVerified: authEmailVerified,
       });
-      userData.emailVerified = authEmailVerified;
     }
 
     // timestamptz columns serialize to ISO 8601 natively — no conversion needed.
-    return userData as unknown as User;
+    // Override emailVerified without mutating the repository's row object.
+    return {
+      ...userData,
+      emailVerified: authEmailVerified,
+    } as unknown as User;
   }
 
   async updateProfile(
@@ -376,11 +405,21 @@ export class AuthService {
     query: string,
     limit: number = 10,
   ): Promise<SearchUserResponse> {
+    // Reject blank/too-short queries (a bare query would match everyone and
+    // enable user enumeration) and clamp the page size.
+    const trimmedQuery = query?.trim() ?? '';
+    if (trimmedQuery.length < 2) {
+      throw new BadRequestException(
+        'Search query must be at least 2 characters',
+      );
+    }
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 10, 1), 100);
+
     try {
       // Case-insensitive substring match over name + email (pg_trgm-backed).
       const users: SearchUserResult[] = await this.usersRepository.search(
-        query,
-        limit,
+        trimmedQuery,
+        safeLimit,
       );
 
       return {
@@ -389,7 +428,7 @@ export class AuthService {
       };
     } catch (error) {
       console.error('User search error:', error);
-      throw new Error('Failed to search users');
+      throw new InternalServerErrorException('Failed to search users');
     }
   }
 

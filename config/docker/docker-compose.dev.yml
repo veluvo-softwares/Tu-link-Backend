@@ -82,13 +82,14 @@ services:
   redis:
     image: redis:7-alpine
     container_name: tulink-redis-dev
-    # Bound to LOCALHOST ONLY (mirrors postgres): lets you run the app on the
-    # host (`npm run start:dev`) with hot-reload against the same Redis the
-    # Dockerized app uses, while the public internet still cannot reach it.
-    # Auth is still required. Host port 6380 → container 6379 (matches .env).
-    # The Dockerized api connects over the internal network by service name.
-    ports:
-      - "127.0.0.1:6380:6379"
+    # BASE = SERVER posture: no host port. Redis is reachable ONLY over the
+    # internal Docker network (tulink-network / local-dev) by the api service,
+    # so on the deployed droplet it is never bound to the host. For LOCAL
+    # development, docker-compose.local.yml publishes it on 127.0.0.1:6380 so
+    # you can run the app on the host (`npm run start:dev`) with hot-reload.
+    # Debug on server: docker exec -it tulink-redis-dev sh -c 'redis-cli -a "$REDIS_PASSWORD" ping'
+    expose:
+      - "6379"
     # Read REDIS_PASSWORD from the SAME .env the app uses (container env), so the
     # two always match. We expand it inside the container (not via Compose
     # ${...} interpolation) so it works no matter where `docker compose` runs.

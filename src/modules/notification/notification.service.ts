@@ -323,9 +323,9 @@ export class NotificationService {
         `FCM token registration error for user ${userId}: ${errorMessage}`,
         errorStack,
       );
-      throw new BadRequestException(
-        `Failed to register FCM token: ${errorMessage}`,
-      );
+      // Keep the detailed cause in the logs above; return a generic message so
+      // internal details (e.g. SQL errors) aren't exposed to the client.
+      throw new BadRequestException('Failed to register FCM token');
     }
   }
 

@@ -33,6 +33,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy() {
-    await this.pool.end();
+    // Guard against a failed init that never assigned the pool.
+    await this.pool?.end();
   }
 }

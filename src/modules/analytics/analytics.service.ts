@@ -34,18 +34,26 @@ export class AnalyticsService {
     // All location updates for this journey, oldest first
     const locations = await this.locationRepository.getAllForJourney(journeyId);
 
+    // Route metrics (distance, speed, stops, polyline) describe the journey's
+    // path, so they must run over a single participant's track. Mixing every
+    // participant's rows (interleaved by createdAt) produces meaningless
+    // jumps between people. Use the leader's locations as the canonical route.
+    const leaderLocations = locations.filter(
+      (loc) => loc.participantId === journey.leaderId,
+    );
+
     // All lag alerts + participant rows
     const lagAlerts = await this.lagAlertRepository.getByJourney(journeyId);
     const participants =
       await this.participantRepository.findByJourney(journeyId);
 
     // Calculate metrics
-    const totalDistance = this.calculateTotalDistance(locations);
-    const averageSpeed = this.calculateAverageSpeed(locations);
+    const totalDistance = this.calculateTotalDistance(leaderLocations);
+    const averageSpeed = this.calculateAverageSpeed(leaderLocations);
     const maxLagDistance = this.calculateMaxLagDistance(lagAlerts);
     const lagAlertCount = lagAlerts.length;
     const participantCount = participants.length;
-    const stats = this.calculateStats(locations);
+    const stats = this.calculateStats(leaderLocations);
 
     // Calculate duration
     const startTime = journey.startTime;
@@ -65,7 +73,7 @@ export class AnalyticsService {
       maxLagDistance,
       lagAlertCount,
       participantCount,
-      routePolyline: this.encodeRoutePolyline(locations),
+      routePolyline: this.encodeRoutePolyline(leaderLocations),
       stats,
     });
 

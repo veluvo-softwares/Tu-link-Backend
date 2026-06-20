@@ -102,6 +102,47 @@ export class LagAlertRepository {
     return toRecord(row);
   }
 
+  // Idempotent lag alert: refresh the participant's existing open alert if one
+  // is already active, otherwise create a fresh row. Prevents an alert row from
+  // accumulating on every follower update while they remain lagging.
+  async upsertActiveForParticipant(
+    input: CreateLagAlertInput,
+  ): Promise<LagAlertRecord> {
+    const [existing] = await this.db
+      .select({ id: lagAlerts.id })
+      .from(lagAlerts)
+      .where(
+        and(
+          eq(lagAlerts.journeyId, input.journeyId),
+          eq(lagAlerts.participantId, input.participantId),
+          eq(lagAlerts.isActive, true),
+        ),
+      )
+      .limit(1);
+
+    if (existing) {
+      const [row] = await this.db
+        .update(lagAlerts)
+        .set({
+          distanceFromLeader: input.distanceFromLeader,
+          leaderLocation: geogPoint(
+            input.leaderLocation.latitude,
+            input.leaderLocation.longitude,
+          ),
+          followerLocation: geogPoint(
+            input.followerLocation.latitude,
+            input.followerLocation.longitude,
+          ),
+          severity: input.severity,
+        })
+        .where(eq(lagAlerts.id, existing.id))
+        .returning(this.selection());
+      return toRecord(row);
+    }
+
+    return this.create(input);
+  }
+
   // Participant caught up → close their open alerts.
   async resolveActiveForParticipant(
     journeyId: string,

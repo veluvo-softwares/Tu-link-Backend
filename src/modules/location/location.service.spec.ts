@@ -213,8 +213,9 @@ describe('LocationService - Redis/Postgres', () => {
       expect(result.success).toBe(true);
       expect(result.sequenceNumber).toBe(42);
 
-      // Give the async persist time to fail and be caught
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Flush the microtask queue so the rejected persist promise's .catch runs
+      // (deterministic — no arbitrary timer that can flake on slow CI).
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(consoleSpy).toHaveBeenCalledWith(
         expect.stringContaining('Location persist failed for user user-123'),
@@ -235,8 +236,8 @@ describe('LocationService - Redis/Postgres', () => {
 
       await service.processLocationUpdate('user-456', mockLocationDto);
 
-      // Wait for async operation
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Flush the microtask queue so the rejected persist promise's .catch runs.
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(consoleSpy).toHaveBeenCalledWith(
         'Location persist failed for user user-456: Database timeout',

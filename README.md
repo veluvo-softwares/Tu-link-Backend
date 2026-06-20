@@ -47,10 +47,28 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
    - Postgres: 127.0.0.1:5432 (localhost only)
    - Redis: 127.0.0.1:6380 (localhost only; container port 6379)
 
-   > Both Postgres and Redis are bound to localhost only, so you can run the app
-   > on the host with hot-reload (`npm run start:dev`) against the same data
+   > Locally, Postgres and Redis are bound to localhost only, so you can run the
+   > app on the host with hot-reload (`npm run start:dev`) against the same data
    > stores the Dockerized app uses. They remain password-protected and
    > unreachable from the public internet.
+
+### Environments & Compose layout
+
+Two Compose files express the difference between local development and the
+deployed server:
+
+| File | Used by | Redis | Postgres |
+|---|---|---|---|
+| `config/docker/docker-compose.dev.yml` (base) | **server** (CI deploy, `--profile server`) | internal-only (no host port) | `127.0.0.1:5432` (host access for migrations / `pg_dump`) |
+| `+ docker-compose.local.yml` (override) | **local** (`npm run docker:dev`, `--profile local`) | adds `127.0.0.1:6380` | (unchanged) |
+
+- **Local development** — `npm run docker:dev` layers the override, so Redis is
+  published on `127.0.0.1:6380` for host `start:dev`. Both `api-dev-local` (in
+  Docker) and a host `start:dev` process reach Redis/Postgres.
+- **Server (deployed)** — CI runs the **base file only** with `--profile server`,
+  so Redis is **never bound to the host**; the `api-dev` container reaches it over
+  the internal Docker network (`REDIS_HOST=redis:6379`). Redis still functions
+  exactly the same — it's just not exposed on the droplet's host interface.
 
 ### Deploy Updates
 ```bash

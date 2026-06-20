@@ -64,6 +64,11 @@ export class ArrivalDetectionService {
       journey.id,
     );
 
+    // No participant row — nothing arrived, so do not report a (false) arrival.
+    if (!markResult.found) {
+      return noArrival;
+    }
+
     if (markResult.alreadyArrived) {
       return { ...noArrival, alreadyArrived: true };
     }
@@ -84,23 +89,25 @@ export class ArrivalDetectionService {
   private async markParticipantArrived(
     participantId: string,
     journeyId: string,
-  ): Promise<{ alreadyArrived: boolean }> {
+  ): Promise<{ found: boolean; alreadyArrived: boolean }> {
     const participant = await this.participantRepository.findOne(
       journeyId,
       participantId,
     );
 
     if (!participant) {
-      return { alreadyArrived: false };
+      return { found: false, alreadyArrived: false };
     }
 
-    if (participant.status === 'ARRIVED') {
-      return { alreadyArrived: true };
-    }
+    // Atomic, race-safe transition: only one concurrent request flips the
+    // status, the rest see null and are treated as already-arrived (no
+    // duplicate arrival side effects).
+    const updated = await this.participantRepository.markArrivedIfNotArrived(
+      journeyId,
+      participantId,
+    );
 
-    await this.participantRepository.markArrived(journeyId, participantId);
-
-    return { alreadyArrived: false };
+    return { found: true, alreadyArrived: updated === null };
   }
 
   /**

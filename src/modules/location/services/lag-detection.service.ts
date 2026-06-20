@@ -1,7 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../../shared/redis/redis.service';
-import { LagAlertRepository } from '../../../database/repositories/lag-alert.repository';
+import {
+  LagAlertRecord,
+  LagAlertRepository,
+} from '../../../database/repositories/lag-alert.repository';
 import { MapsService } from '../../maps/services/maps.service';
 import {
   LocationUpdate,
@@ -12,6 +15,23 @@ import { LagAlert } from '../../../shared/interfaces/notification.interface';
 import { LagSeverity } from '../../../types/notification.type';
 import { LatLng } from '../../../database/schema/columns/geography-point';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
+
+// Maps the repository row to the API LagAlert shape (the row carries
+// `Date | null` for the resolved/acknowledged timestamps; the interface uses
+// optional `Date`).
+const toLagAlert = (record: LagAlertRecord): LagAlert => ({
+  id: record.id,
+  journeyId: record.journeyId,
+  participantId: record.participantId,
+  distanceFromLeader: record.distanceFromLeader,
+  leaderLocation: record.leaderLocation,
+  followerLocation: record.followerLocation,
+  severity: record.severity,
+  isActive: record.isActive,
+  createdAt: record.createdAt,
+  resolvedAt: record.resolvedAt ?? undefined,
+  acknowledgedAt: record.acknowledgedAt ?? undefined,
+});
 
 @Injectable()
 export class LagDetectionService {
@@ -100,7 +120,7 @@ export class LagDetectionService {
     followerLocation: LatLng;
     severity: LagSeverity;
   }): Promise<LagAlert> {
-    const alert = await this.lagAlertRepository.create({
+    const alert = await this.lagAlertRepository.upsertActiveForParticipant({
       journeyId: data.journeyId,
       participantId: data.participantId,
       distanceFromLeader: data.distanceFromLeader,
@@ -109,7 +129,7 @@ export class LagDetectionService {
       severity: data.severity,
     });
 
-    return alert as unknown as LagAlert;
+    return toLagAlert(alert);
   }
 
   /**
@@ -130,7 +150,7 @@ export class LagDetectionService {
    */
   async getActiveLagAlerts(journeyId: string): Promise<LagAlert[]> {
     const alerts = await this.lagAlertRepository.getActive(journeyId);
-    return alerts as unknown as LagAlert[];
+    return alerts.map(toLagAlert);
   }
 
   /**

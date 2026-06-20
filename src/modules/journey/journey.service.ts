@@ -288,6 +288,13 @@ export class JourneyService {
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
     const journey = await this.findById(journeyId);
 
+    // Can't join a journey that has already ended or been cancelled.
+    if (journey.status === 'COMPLETED' || journey.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'This journey is no longer accepting participants',
+      );
+    }
+
     if (journey.status === 'ACTIVE') {
       // Journey already started — promote directly to ACTIVE so the user can
       // immediately join the WebSocket room and send location updates.
@@ -393,6 +400,12 @@ export class JourneyService {
       const journeyId = participant.journeyId;
       try {
         const journey = await this.findById(journeyId);
+
+        // Don't surface invitations for journeys that have ended or been
+        // cancelled — they can't be accepted.
+        if (journey.status === 'COMPLETED' || journey.status === 'CANCELLED') {
+          continue;
+        }
 
         // Get inviter details
         const inviter = participant.invitedBy

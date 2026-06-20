@@ -12,7 +12,7 @@ export interface Participant {
   status: ParticipantStatus;
   joinedAt?: Date;
   leftAt?: Date;
-  invitedBy: string;
+  invitedBy?: string;
   lastSeenAt?: Date;
   arrivedAt?: Date;
   connectionStatus: ConnectionStatus;

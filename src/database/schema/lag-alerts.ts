@@ -1,6 +1,7 @@
 import {
   boolean,
   doublePrecision,
+  foreignKey,
   index,
   pgTable,
   text,
@@ -10,6 +11,7 @@ import {
 import { geographyPoint } from './columns/geography-point';
 import { lagSeverityEnum } from './enums';
 import { journeys } from './journeys';
+import { participants } from './participants';
 
 // LAG ALERTS — participant_id is text = user_id (invariant A).
 export const lagAlerts = pgTable(
@@ -31,5 +33,13 @@ export const lagAlerts = pgTable(
     resolvedAt: timestamp('resolved_at', { withTimezone: true }),
     acknowledgedAt: timestamp('acknowledged_at', { withTimezone: true }),
   },
-  (t) => [index('idx_lag_active').on(t.journeyId, t.participantId, t.isActive)],
+  (t) => [
+    // participant_id is text = user_id (invariant A); enforce that an alert can
+    // only reference a real participant of the same journey (mirrors locations).
+    foreignKey({
+      columns: [t.journeyId, t.participantId],
+      foreignColumns: [participants.journeyId, participants.userId],
+    }).onDelete('cascade'),
+    index('idx_lag_active').on(t.journeyId, t.participantId, t.isActive),
+  ],
 );
