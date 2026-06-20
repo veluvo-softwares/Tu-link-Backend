@@ -1,4 +1,3 @@
-import { Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import { Priority } from '../../types/priority.type';
 
 export interface LocationHistory {
@@ -6,12 +5,12 @@ export interface LocationHistory {
   journeyId: string;
   participantId: string;
   userId: string;
-  location: GeoPoint;
+  location: { latitude: number; longitude: number };
   accuracy: number;
   heading?: number;
   speed?: number;
   altitude?: number;
-  timestamp: Timestamp;
+  timestamp: Date;
   sequenceNumber: number;
   priority: Priority;
   metadata: {

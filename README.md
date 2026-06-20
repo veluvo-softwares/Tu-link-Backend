@@ -1,6 +1,6 @@
 # Tu-Link Backend API
 
-A real-time convoy coordination platform backend built with NestJS, providing location tracking, journey management, and Firebase authentication. Built by the team at veluvo softwares
+A real-time convoy coordination platform backend built with NestJS, providing location tracking, journey management, Postgres/PostGIS persistence, and Firebase authentication. Built by the team at veluvo softwares
 
 ## 🚀 Quick Start
 
@@ -27,17 +27,48 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
 
 3. **Start Development Environment**
    ```bash
-   # Using Docker (Recommended)
+   # Using Docker (Recommended) — brings up Postgres + PostGIS, Redis, and the API
    npm run docker:dev
-   
+
    # OR run manually
    npm run start:dev
    ```
 
-4. **Access Application**
-   - API Health: http://localhost:3000/health
-   - Swagger Docs: http://localhost:3000/api
-   - Redis: localhost:6380
+4. **Apply Database Migrations** (first run, and after any schema change)
+   ```bash
+   # Runs from the host against the Postgres container (127.0.0.1:5432).
+   # Requires POSTGRES_PASSWORD + DATABASE_URL set in .env.
+   npm run db:migrate
+   ```
+
+5. **Access Application**
+   - API Health: http://localhost:3001/health (local profile maps host 3001 → 3000)
+   - Swagger Docs: http://localhost:3001/api
+   - Postgres: 127.0.0.1:5432 (localhost only)
+   - Redis: 127.0.0.1:6380 (localhost only; container port 6379)
+
+   > Locally, Postgres and Redis are bound to localhost only, so you can run the
+   > app on the host with hot-reload (`npm run start:dev`) against the same data
+   > stores the Dockerized app uses. They remain password-protected and
+   > unreachable from the public internet.
+
+### Environments & Compose layout
+
+Two Compose files express the difference between local development and the
+deployed server:
+
+| File | Used by | Redis | Postgres |
+|---|---|---|---|
+| `config/docker/docker-compose.dev.yml` (base) | **server** (CI deploy, `--profile server`) | internal-only (no host port) | `127.0.0.1:5432` (host access for migrations / `pg_dump`) |
+| `+ docker-compose.local.yml` (override) | **local** (`npm run docker:dev`, `--profile local`) | adds `127.0.0.1:6380` | (unchanged) |
+
+- **Local development** — `npm run docker:dev` layers the override, so Redis is
+  published on `127.0.0.1:6380` for host `start:dev`. Both `api-dev-local` (in
+  Docker) and a host `start:dev` process reach Redis/Postgres.
+- **Server (deployed)** — CI runs the **base file only** with `--profile server`,
+  so Redis is **never bound to the host**; the `api-dev` container reaches it over
+  the internal Docker network (`REDIS_HOST=redis:6379`). Redis still functions
+  exactly the same — it's just not exposed on the droplet's host interface.
 
 ### Deploy Updates
 ```bash
@@ -48,6 +79,7 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
 
 - **Real-Time Location Tracking** - WebSocket-based with <150ms latency
 - **Journey Management** - Complete convoy lifecycle
+- **Postgres + PostGIS Persistence** - Self-hosted relational + geospatial store
 - **Firebase Authentication** - Secure user auth with refresh tokens
 - **Google Maps Integration** - Geocoding and routing
 - **Redis Caching** - High-performance data layer
@@ -56,11 +88,11 @@ A real-time convoy coordination platform backend built with NestJS, providing lo
 ## 🛠️ Tech Stack
 
 - **Framework**: NestJS (TypeScript)
-- **Database**: Firebase Firestore
+- **Database**: PostgreSQL 16 + PostGIS 3.4 (via Drizzle ORM + `pg`)
 - **Real-Time**: Socket.io WebSockets
 - **Cache**: Redis
 - **Maps**: Google Maps Platform + Mapbox
-- **Auth**: Firebase Auth
+- **Auth & Push**: Firebase Auth + FCM (Firestore is no longer used for persistence)
 
 ## Description
 
@@ -90,8 +122,21 @@ cp .env.example .env
 - `FIREBASE_PROJECT_ID` - From Firebase Console
 - `FIREBASE_CLIENT_EMAIL` - From service account JSON
 - `FIREBASE_PRIVATE_KEY` - From service account JSON
-- `FIREBASE_DATABASE_URL` - Your Firestore URL
+- `FIREBASE_DATABASE_URL` - Realtime Database URL (Auth/FCM project)
 - `FIREBASE_API_KEY` - Web API Key (for authentication) **⚠️ Required for login**
+
+**Required Postgres Variables:**
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` - DB credentials (the
+  PostGIS container reads these on first init)
+- `POSTGRES_HOST` / `POSTGRES_PORT` - `localhost` / `5432` on the host; the app
+  overrides `POSTGRES_HOST=postgres` inside Docker (set in compose)
+- `DATABASE_URL` - `postgresql://<user>:<password>@localhost:5432/<db>`, used by
+  drizzle-kit migrations (runs from the host) **⚠️ keep password in sync with
+  `POSTGRES_PASSWORD`**
+
+> Note: the PostGIS container only reads `POSTGRES_PASSWORD` on first volume
+> init. If you change it later, recreate the volume:
+> `docker volume rm docker_postgres_dev_data`.
 
 ### 3. Start Development Environment
 ```bash
@@ -204,6 +249,11 @@ npm run lint
 # Docker development environment
 npm run docker:dev
 npm run docker:down
+
+# Database (Drizzle + Postgres/PostGIS)
+npm run db:generate   # generate a new migration from schema changes
+npm run db:migrate    # apply pending migrations (host → 127.0.0.1:5432)
+npm run db:studio     # open Drizzle Studio
 ```
 
 ## 🌐 Deployment
@@ -239,9 +289,14 @@ These files are **version controlled** and should NOT be in `.gitignore`:
 
 ```
 src/
-├── config/              # Configuration modules
-├── common/              # Shared utilities, guards, filters
+├── config/              # Configuration modules (incl. database.config.ts)
+├── common/              # Shared utilities, guards, filters (incl. geo.utils.ts)
 ├── shared/              # Shared modules (Firebase, Redis)
+├── database/            # Postgres layer (Drizzle)
+│   ├── schema/         # Table definitions + custom geography column
+│   ├── migrations/     # drizzle-kit SQL migrations
+│   ├── repositories/   # Postgres-backed data access per domain
+│   └── database.module.ts / database.service.ts  # @Global pooled Drizzle client
 ├── modules/
 │   ├── auth/           # Authentication
 │   ├── journey/        # Journey management
@@ -256,9 +311,10 @@ src/
 
 ### Hybrid Real-Time Strategy
 - **Primary**: WebSocket for <150ms updates
-- **Fallback**: Firebase listeners for offline sync
-- **Persistence**: Firestore for all data
-- **Cache**: Redis for hot data & sequences
+- **Persistence**: Postgres + PostGIS for all data (users, journeys,
+  participants, locations, lag alerts, notifications, analytics)
+- **Cache / live state**: Redis for hot data, sequences & convoy positions
+- **Auth & Push**: Firebase Auth + FCM
 
 ### Uber-Inspired Patterns
 - Priority-based message delivery (HIGH/MEDIUM/LOW)
@@ -352,6 +408,9 @@ Required environment variables (see `.env.example`):
 - `FIREBASE_PRIVATE_KEY` - Service account private key
 - `GOOGLE_MAPS_API_KEY` - Google Maps API key
 - `JWT_SECRET` - JWT signing secret
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` - Postgres credentials
+- `DATABASE_URL` - Postgres connection string for drizzle-kit migrations
+- `REDIS_PASSWORD` - Redis auth password
 
 ## 🔍 Troubleshooting
 
@@ -371,8 +430,12 @@ docker compose -f config/docker/docker-compose.dev.yml logs -f
 - Check Firebase API key permissions
 
 **Database connection issues:**
-- Ensure Redis is running
-- Check Redis connection settings
+- Ensure the Postgres + Redis containers are healthy:
+  `docker compose -f config/docker/docker-compose.dev.yml ps`
+- Verify `POSTGRES_PASSWORD` / `DATABASE_URL` (host) and `REDIS_PASSWORD` in `.env`
+- If Postgres auth fails after changing the password, recreate the volume:
+  `docker volume rm docker_postgres_dev_data` then `npm run docker:dev`
+- If queries fail with "relation does not exist", run `npm run db:migrate`
 
 ## 📄 License
 

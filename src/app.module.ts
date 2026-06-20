@@ -10,10 +10,12 @@ import appConfig from './config/app.config';
 import firebaseConfig from './config/firebase.config';
 import redisConfig from './config/redis.config';
 import mapsConfig from './config/maps.config';
+import databaseConfig from './config/database.config';
 
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
+import { DatabaseModule } from './database/database.module';
 import { LoggerModule } from './shared/logger/logger.module';
 
 // Feature modules
@@ -29,13 +31,20 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     // Global configuration
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, firebaseConfig, redisConfig, mapsConfig],
+      load: [
+        appConfig,
+        firebaseConfig,
+        redisConfig,
+        mapsConfig,
+        databaseConfig,
+      ],
     }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     // Shared modules
     LoggerModule,
     FirebaseModule,
     RedisModule,
+    DatabaseModule,
     // Feature modules
     AuthModule,
     JourneyModule,

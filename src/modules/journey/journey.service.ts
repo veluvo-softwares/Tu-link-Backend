@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
   Inject,
@@ -10,8 +7,9 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { JourneyRepository } from '../../database/repositories/journey.repository';
+import { UsersRepository } from '../../database/repositories/users.repository';
 import { ParticipantService } from './services/participant.service';
 import { NotificationService } from '../notification/notification.service';
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -19,12 +17,12 @@ import { LocationGateway } from '../location/location.gateway';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
-import { FieldValue, GeoPoint } from 'firebase-admin/firestore';
 
 @Injectable()
 export class JourneyService {
   constructor(
-    private firebaseService: FirebaseService,
+    private journeyRepository: JourneyRepository,
+    private usersRepository: UsersRepository,
     private redisService: RedisService,
     private participantService: ParticipantService,
     private notificationService: NotificationService,
@@ -38,54 +36,36 @@ export class JourneyService {
     userId: string,
     createJourneyDto: CreateJourneyDto,
   ): Promise<Journey> {
-    const journeyRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc();
-
-    const journeyData = {
+    const journey = await this.journeyRepository.create({
       name: createJourneyDto.name,
       leaderId: userId,
-      status: 'PENDING' as const,
-      destination: createJourneyDto.destination
-        ? new GeoPoint(
-            createJourneyDto.destination.latitude,
-            createJourneyDto.destination.longitude,
-          )
-        : undefined,
+      destination: createJourneyDto.destination,
       destinationAddress: createJourneyDto.destinationAddress,
       lagThresholdMeters:
         createJourneyDto.lagThresholdMeters ||
-        this.configService.get('app.defaultLagThresholdMeters') ||
+        this.configService.get<number>('app.defaultLagThresholdMeters') ||
         500,
-      createdAt: FieldValue.serverTimestamp() as any,
-      updatedAt: FieldValue.serverTimestamp() as any,
-      metadata: {},
-    };
-
-    await journeyRef.set(journeyData);
+    });
 
     // Add creator as leader participant
     await this.participantService.addParticipant(
-      journeyRef.id,
+      journey.id,
       userId,
       userId,
       'LEADER',
     );
 
-    return { id: journeyRef.id, ...journeyData } as Journey;
+    return journey as unknown as Journey;
   }
 
   async findById(journeyId: string): Promise<Journey> {
-    const journeyDoc = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .get();
+    const journey = await this.journeyRepository.findById(journeyId);
 
-    if (!journeyDoc.exists) {
+    if (!journey) {
       throw new NotFoundException('Journey not found');
     }
 
-    return { id: journeyDoc.id, ...journeyDoc.data() } as Journey;
+    return journey as unknown as Journey;
   }
 
   async update(
@@ -103,22 +83,12 @@ export class JourneyService {
       throw new BadRequestException('Can only update pending journeys');
     }
 
-    const updateData: any = {
-      ...updateJourneyDto,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-
-    if (updateJourneyDto.destination) {
-      updateData.destination = new GeoPoint(
-        updateJourneyDto.destination.latitude,
-        updateJourneyDto.destination.longitude,
-      );
-    }
-
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .update(updateData);
+    await this.journeyRepository.update(journeyId, {
+      name: updateJourneyDto.name,
+      destination: updateJourneyDto.destination,
+      destinationAddress: updateJourneyDto.destinationAddress,
+      lagThresholdMeters: updateJourneyDto.lagThresholdMeters,
+    });
 
     return this.findById(journeyId);
   }
@@ -134,14 +104,9 @@ export class JourneyService {
       throw new BadRequestException('Cannot delete active journey');
     }
 
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .update({
-        status: 'CANCELLED',
-        endTime: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+    await this.journeyRepository.updateStatus(journeyId, 'CANCELLED', {
+      setEndTime: true,
+    });
 
     // Clean up all Redis keys for this journey
     // Participant keys must be cleared before clearJourneyCache() removes the
@@ -182,30 +147,17 @@ export class JourneyService {
       throw new BadRequestException('Journey already started or completed');
     }
 
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .update({
-        status: 'ACTIVE',
-        startTime: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+    await this.journeyRepository.updateStatus(journeyId, 'ACTIVE', {
+      setStartTime: true,
+    });
 
-    // Update all accepted participants to active
+    // Capture who is being activated BEFORE the bulk update (the filter below
+    // keys off the pre-activation ACCEPTED/LEADER state for Redis + notifications).
     const participants =
       await this.participantService.getJourneyParticipants(journeyId);
-    const updates = participants
-      .filter((p) => p.status === 'ACCEPTED' || p.role === 'LEADER')
-      .map((p) =>
-        this.firebaseService.firestore
-          .collection('journeys')
-          .doc(journeyId)
-          .collection('participants')
-          .doc(p.userId)
-          .update({ status: 'ACTIVE' }),
-      );
 
-    await Promise.all(updates);
+    // Promote all accepted participants (and the leader) to ACTIVE in one query
+    await this.participantService.activateForStart(journeyId);
 
     // Add to active journeys in Redis
     await this.redisService.addActiveJourney(journeyId);
@@ -270,14 +222,9 @@ export class JourneyService {
   }
 
   private async completeJourney(journeyId: string): Promise<Journey> {
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .update({
-        status: 'COMPLETED',
-        endTime: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      });
+    await this.journeyRepository.updateStatus(journeyId, 'COMPLETED', {
+      setEndTime: true,
+    });
 
     // Calculate and store analytics — fire-and-forget, do not block end()
     this.analyticsService
@@ -341,24 +288,17 @@ export class JourneyService {
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
     const journey = await this.findById(journeyId);
 
+    // Can't join a journey that has already ended or been cancelled.
+    if (journey.status === 'COMPLETED' || journey.status === 'CANCELLED') {
+      throw new BadRequestException(
+        'This journey is no longer accepting participants',
+      );
+    }
+
     if (journey.status === 'ACTIVE') {
       // Journey already started — promote directly to ACTIVE so the user can
       // immediately join the WebSocket room and send location updates.
-      const participantRef = this.firebaseService.firestore
-        .collection('journeys')
-        .doc(journeyId)
-        .collection('participants')
-        .doc(userId);
-
-      const participantDoc = await participantRef.get();
-      if (!participantDoc.exists) {
-        throw new NotFoundException('Invitation not found');
-      }
-
-      await participantRef.update({
-        status: 'ACTIVE',
-        joinedAt: FieldValue.serverTimestamp(),
-      });
+      await this.participantService.markActive(journeyId, userId);
 
       // Add to the Redis participants set so they appear in live snapshot queries.
       await this.redisService.addJourneyParticipant(journeyId, userId);
@@ -366,11 +306,8 @@ export class JourneyService {
       await this.participantService.acceptInvitation(journeyId, userId);
     }
 
-    const userDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(userId)
-      .get();
-    const displayName = userDoc.data()?.displayName || 'Unknown';
+    const user = await this.usersRepository.findById(userId);
+    const displayName = user?.displayName || 'Unknown';
 
     this.locationGateway.broadcastParticipantAccepted(journeyId, {
       userId,
@@ -400,25 +337,20 @@ export class JourneyService {
     }
 
     // Check if invited user exists
-    const invitedUserDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(invitedUserId)
-      .get();
+    const invitedUser = await this.usersRepository.findById(invitedUserId);
 
-    if (!invitedUserDoc.exists) {
+    if (!invitedUser) {
       throw new NotFoundException('Invited user not found');
     }
 
     // Check if user is already invited or participating
-    const existingParticipant = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(invitedUserId)
-      .get();
+    const existingParticipant = await this.participantService.getParticipant(
+      journeyId,
+      invitedUserId,
+    );
 
-    if (existingParticipant.exists) {
-      const status = existingParticipant.data()?.status;
+    if (existingParticipant) {
+      const status = existingParticipant.status;
       if (status === 'INVITED') {
         throw new BadRequestException('User already invited to this journey');
       }
@@ -456,50 +388,52 @@ export class JourneyService {
   }
 
   async getUserPendingInvitations(userId: string): Promise<any[]> {
-    // Get all participant records where user is invited
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('participants')
-      .where('userId', '==', userId)
-      .where('status', '==', 'INVITED')
-      .get();
+    // Participant rows where this user is invited (replaces collectionGroup).
+    const pending = await this.participantService.getUserParticipations(
+      userId,
+      ['INVITED'],
+    );
 
     const invitations: any[] = [];
 
-    for (const doc of snapshot.docs) {
-      const journeyId = doc.ref.parent.parent?.id;
-      if (journeyId) {
-        try {
-          const journey = await this.findById(journeyId);
+    for (const participant of pending) {
+      const journeyId = participant.journeyId;
+      try {
+        const journey = await this.findById(journeyId);
 
-          // Get inviter details
-          const inviterDoc = await this.firebaseService.firestore
-            .collection('users')
-            .doc(doc.data().invitedBy)
-            .get();
-
-          invitations.push({
-            journeyId: journey.id,
-            journeyName: journey.name,
-            destination: journey.destinationAddress,
-            invitedBy: {
-              uid: doc.data().invitedBy,
-              displayName: inviterDoc.data()?.displayName || 'Unknown',
-              email: inviterDoc.data()?.email || '',
-            },
-            invitedAt: doc.data().createdAt || new Date().toISOString(),
-          });
-        } catch (error) {
-          // Only skip if journey was deleted (NotFoundException expected)
-          if (error instanceof NotFoundException) {
-            continue;
-          }
-          // Log other errors but continue processing remaining invitations
-          console.error(
-            `Error fetching journey ${journeyId} for invitation:`,
-            error,
-          );
+        // Don't surface invitations for journeys that have ended or been
+        // cancelled — they can't be accepted.
+        if (journey.status === 'COMPLETED' || journey.status === 'CANCELLED') {
           continue;
         }
+
+        // Get inviter details
+        const inviter = participant.invitedBy
+          ? await this.usersRepository.findById(participant.invitedBy)
+          : null;
+
+        invitations.push({
+          journeyId: journey.id,
+          journeyName: journey.name,
+          destination: journey.destinationAddress,
+          invitedBy: {
+            uid: participant.invitedBy,
+            displayName: inviter?.displayName || 'Unknown',
+            email: inviter?.email || '',
+          },
+          invitedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        // Only skip if journey was deleted (NotFoundException expected)
+        if (error instanceof NotFoundException) {
+          continue;
+        }
+        // Log other errors but continue processing remaining invitations
+        console.error(
+          `Error fetching journey ${journeyId} for invitation:`,
+          error,
+        );
+        continue;
       }
     }
 
@@ -513,12 +447,8 @@ export class JourneyService {
     journeyName: string,
   ): Promise<void> {
     // Get inviter details
-    const inviterDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(inviterId)
-      .get();
-
-    const inviterName = inviterDoc.data()?.displayName || 'Someone';
+    const inviter = await this.usersRepository.findById(inviterId);
+    const inviterName = inviter?.displayName || 'Someone';
 
     // Send invitation notification with FCM push notification
     await this.notificationService.sendJourneyInvite(
@@ -530,17 +460,12 @@ export class JourneyService {
   }
 
   async getUserActiveJourneys(userId: string): Promise<Journey[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('participants')
-      .where('userId', '==', userId)
-      .where('status', 'in', ['ACTIVE', 'ACCEPTED'])
-      .get();
-
-    const journeyIds = new Set(
-      snapshot.docs
-        .map((doc) => doc.ref.parent.parent?.id)
-        .filter((id): id is string => id !== undefined),
+    const participations = await this.participantService.getUserParticipations(
+      userId,
+      ['ACTIVE', 'ACCEPTED'],
     );
+
+    const journeyIds = new Set(participations.map((p) => p.journeyId));
     const journeys: Journey[] = [];
 
     for (const journeyId of journeyIds) {
@@ -554,16 +479,10 @@ export class JourneyService {
   }
 
   async getUserJourneyHistory(userId: string): Promise<Journey[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('participants')
-      .where('userId', '==', userId)
-      .get();
+    const participations =
+      await this.participantService.getUserParticipations(userId);
 
-    const journeyIds = new Set(
-      snapshot.docs
-        .map((doc) => doc.ref.parent.parent?.id)
-        .filter((id): id is string => id !== undefined),
-    );
+    const journeyIds = new Set(participations.map((p) => p.journeyId));
     const journeys: Journey[] = [];
 
     for (const journeyId of journeyIds) {
@@ -578,20 +497,22 @@ export class JourneyService {
       }
     }
 
-    // Sort by endTime (most recent first)
-    return journeys.sort((a, b) => {
-      const aTime = a.endTime
-        ? typeof a.endTime === 'string'
-          ? new Date(a.endTime).getTime()
-          : a.endTime.toDate().getTime()
-        : 0;
-      const bTime = b.endTime
-        ? typeof b.endTime === 'string'
-          ? new Date(b.endTime).getTime()
-          : b.endTime.toDate().getTime()
-        : 0;
-      return bTime - aTime;
-    });
+    // Sort by endTime (most recent first). endTime is a Date from Postgres,
+    // but tolerate string/Firestore-Timestamp shapes defensively.
+    const toMillis = (value: unknown): number => {
+      if (!value) return 0;
+      if (value instanceof Date) return value.getTime();
+      if (typeof value === 'string') return new Date(value).getTime();
+      if (
+        typeof value === 'object' &&
+        typeof (value as { toDate?: () => Date }).toDate === 'function'
+      ) {
+        return (value as { toDate: () => Date }).toDate().getTime();
+      }
+      return 0;
+    };
+
+    return journeys.sort((a, b) => toMillis(b.endTime) - toMillis(a.endTime));
   }
 
   async getJourneyWithParticipants(journeyId: string, userId: string) {

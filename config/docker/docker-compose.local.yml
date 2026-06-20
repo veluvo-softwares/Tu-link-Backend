@@ -1,0 +1,17 @@
+# Local development override (NOT used on the server).
+#
+# Layered on top of docker-compose.dev.yml for local work only:
+#   docker compose -f config/docker/docker-compose.dev.yml \
+#                  -f config/docker/docker-compose.local.yml \
+#                  --profile local up -d
+# (this is what `npm run docker:dev` runs).
+#
+# It publishes Redis on LOCALHOST so you can run the app on the host with
+# hot-reload (`npm run start:dev`) against the same Redis the Dockerized app
+# uses. (Postgres is already localhost-bound in the base file because the
+# server needs host access for migrations / pg_dump backups.) The server deploy
+# uses the base file only, so on the droplet Redis stays internal-only.
+services:
+  redis:
+    ports:
+      - "127.0.0.1:6380:6379" # host 6380 → container 6379; the host's .env sets REDIS_PORT=6380 (the container always listens on 6379)
