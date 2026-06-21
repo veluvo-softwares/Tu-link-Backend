@@ -135,6 +135,13 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+      # First boot on a fresh volume runs initdb + installs the PostGIS
+      # extensions, which can take well over the bare retries*interval window
+      # (especially while the image is also building on the droplet). Without a
+      # start_period those early failures count against retries and the
+      # container flips to "unhealthy", aborting api-dev's depends_on. Give init
+      # a grace window so only post-startup failures count.
+      start_period: 60s
     networks:
       - tulink-network  # Server profile
       - local-dev       # Local profile
