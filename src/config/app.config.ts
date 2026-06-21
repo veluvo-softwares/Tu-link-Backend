@@ -30,6 +30,14 @@ export default registerAs('app', () => ({
   heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '30000', 10),
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
+  // Live-tracking broadcast throttle floors (per priority). A real >50m move
+  // (MEDIUM) broadcasts immediately; minor steady-driving deltas (LOW) are
+  // smoothed to ~2s. HIGH is never throttled. Env-overridable.
+  liveThrottleMediumMs: parseInt(
+    process.env.LIVE_THROTTLE_MEDIUM_MS || '0',
+    10,
+  ),
+  liveThrottleLowMs: parseInt(process.env.LIVE_THROTTLE_LOW_MS || '2000', 10),
   websocket: {
     smallJourneyThreshold: parseInt(
       process.env.WS_SMALL_JOURNEY_THRESHOLD || '5',
