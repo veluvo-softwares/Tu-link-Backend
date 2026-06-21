@@ -56,14 +56,25 @@ export class MapsService {
     query: string,
     lat?: number,
     lng?: number,
+    regionCode?: string,
   ): Promise<PlaceResult[]> {
+    // Resolve region defensively: prefer a valid client value, else fall back
+    // to the config default. A bad/empty regionCode must never break search.
+    const fallbackRegion = this.configService.get<string>(
+      'maps.defaultRegionCode',
+      'KE',
+    );
+    const region =
+      regionCode && /^[A-Z]{2}$/.test(regionCode) ? regionCode : fallbackRegion;
+
     // Build cache key with 2dp precision for search (Watchout 3)
     const normalizedQuery = query.toLowerCase().trim().replace(/\s+/g, '_');
     const latStr = lat !== undefined ? lat.toFixed(2) : '';
     const lngStr = lng !== undefined ? lng.toFixed(2) : '';
     const locationSuffix =
       lat !== undefined && lng !== undefined ? `:${latStr}:${lngStr}` : '';
-    const cacheKey = `maps:search:${normalizedQuery}${locationSuffix}`;
+    // Namespace by region so a region change can't serve stale cross-region results
+    const cacheKey = `maps:search:${region}:${normalizedQuery}${locationSuffix}`;
 
     // Check Redis cache first
     const redisClient = this.redisService.getClient();
@@ -81,6 +92,7 @@ export class MapsService {
       textQuery: string;
       pageSize: number;
       languageCode: string;
+      regionCode: string;
       locationBias?: {
         circle: {
           center: { latitude: number; longitude: number };
@@ -93,6 +105,7 @@ export class MapsService {
       textQuery: query,
       pageSize: 5,
       languageCode: 'en',
+      regionCode: region,
     };
 
     // Add location bias if coordinates provided
