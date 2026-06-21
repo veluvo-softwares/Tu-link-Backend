@@ -3,12 +3,15 @@
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
+  BadRequestException,
   ConflictException,
+  InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
+import { UsersRepository } from '../../database/repositories/users.repository';
 import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -23,8 +26,6 @@ import {
   VerificationResponse,
   EmailVerificationResponse,
 } from './interfaces/verification-response.interface';
-import { FieldValue } from 'firebase-admin/firestore';
-import { convertCommonTimestamps } from '../../common/utils/date.utils';
 import axios from 'axios';
 
 @Injectable()
@@ -35,6 +36,7 @@ export class AuthService {
 
   constructor(
     private firebaseService: FirebaseService,
+    private usersRepository: UsersRepository,
     private configService: ConfigService,
     private emailService: TuLinkResendEmailService,
   ) {
@@ -69,35 +71,29 @@ export class AuthService {
       const userRecord =
         await this.firebaseService.auth.createUser(createUserPayload);
 
-      // Create Firestore user document
-      interface UserData {
-        email: string;
-        displayName: string;
-        emailVerified: boolean;
-        phoneVerified: boolean;
-        createdAt: ReturnType<typeof FieldValue.serverTimestamp>;
-        updatedAt: ReturnType<typeof FieldValue.serverTimestamp>;
-        phoneNumber?: string;
+      // Create the Postgres user row (PK = Firebase UID; invariant A). If this
+      // fails we must delete the just-created Firebase user, otherwise a Firebase
+      // identity would exist with no corresponding DB row (orphan).
+      try {
+        await this.usersRepository.create({
+          id: userRecord.uid,
+          email: registerDto.email,
+          displayName: registerDto.displayName,
+          phoneNumber: registerDto.phoneNumber,
+          emailVerified: false,
+          phoneVerified: false,
+        });
+      } catch (dbError) {
+        await this.firebaseService.auth
+          .deleteUser(userRecord.uid)
+          .catch((cleanupError) =>
+            console.error(
+              `Failed to roll back Firebase user ${userRecord.uid} after DB write failure:`,
+              cleanupError,
+            ),
+          );
+        throw dbError;
       }
-
-      const userData: UserData = {
-        email: registerDto.email,
-        displayName: registerDto.displayName,
-        emailVerified: false,
-        phoneVerified: false,
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      };
-
-      // Only add phoneNumber to Firestore if provided
-      if (registerDto.phoneNumber) {
-        userData.phoneNumber = registerDto.phoneNumber;
-      }
-
-      await this.firebaseService.firestore
-        .collection('users')
-        .doc(userRecord.uid)
-        .set(userData);
 
       // Sign in the user to get an ID token and refresh token
       const signInResponse = await axios.post(
@@ -194,41 +190,25 @@ export class AuthService {
       // Get Firebase Auth user record (has the correct email verification status)
       const firebaseUser = await this.firebaseService.auth.getUser(localId);
 
-      // Get user data from Firestore
-      const userDoc = await this.firebaseService.firestore
-        .collection('users')
-        .doc(localId)
-        .get();
+      // Get user data from Postgres
+      const userData = await this.usersRepository.findById(localId);
 
-      if (!userDoc.exists) {
+      if (!userData) {
         throw new NotFoundException('User profile not found');
       }
 
-      const userData = userDoc.data() as
-        | {
-            displayName?: string;
-            phoneNumber?: string;
-            emailVerified?: boolean;
-          }
-        | undefined;
-
-      // Sync email verification status between Firebase Auth and Firestore
+      // Sync email verification status between Firebase Auth and Postgres
       const authEmailVerified = firebaseUser.emailVerified;
-      const firestoreEmailVerified = userData?.emailVerified || false;
+      const dbEmailVerified = userData.emailVerified;
 
-      if (authEmailVerified !== firestoreEmailVerified) {
+      if (authEmailVerified !== dbEmailVerified) {
         console.log(
-          `Syncing email verification status: Firebase Auth=${authEmailVerified}, Firestore=${firestoreEmailVerified}`,
+          `Syncing email verification status: Firebase Auth=${authEmailVerified}, DB=${dbEmailVerified}`,
         );
 
-        // Update Firestore to match Firebase Auth
-        await this.firebaseService.firestore
-          .collection('users')
-          .doc(localId)
-          .update({
-            emailVerified: authEmailVerified,
-            updatedAt: FieldValue.serverTimestamp(),
-          });
+        await this.usersRepository.update(localId, {
+          emailVerified: authEmailVerified,
+        });
       }
 
       // Return the ID token and refresh token from Firebase
@@ -236,8 +216,8 @@ export class AuthService {
         user: {
           uid: localId,
           email: email,
-          displayName: userData?.displayName || '',
-          phoneNumber: userData?.phoneNumber,
+          displayName: userData.displayName || '',
+          phoneNumber: userData.phoneNumber ?? undefined,
           emailVerified: authEmailVerified, // Use Firebase Auth as source of truth
         },
         tokens: {
@@ -247,6 +227,16 @@ export class AuthService {
         },
       };
     } catch (error) {
+      // A missing Postgres profile (or any deliberate Nest HTTP error) must
+      // propagate as-is — don't let the Firebase-REST handling below collapse
+      // it into a generic 401.
+      if (
+        error instanceof NotFoundException ||
+        error instanceof UnauthorizedException
+      ) {
+        throw error;
+      }
+
       if (error.response?.data?.error) {
         const firebaseError = error.response.data.error;
 
@@ -294,59 +284,43 @@ export class AuthService {
     // Get Firebase Auth user for accurate email verification status
     const firebaseUser = await this.firebaseService.auth.getUser(uid);
 
-    const userDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(uid)
-      .get();
+    const userData = await this.usersRepository.findById(uid);
 
-    if (!userDoc.exists) {
+    if (!userData) {
       throw new NotFoundException('User not found');
     }
 
-    const userData = { id: userDoc.id, ...userDoc.data() } as User;
-
     // Sync email verification status if needed
     const authEmailVerified = firebaseUser.emailVerified;
-    const firestoreEmailVerified = userData.emailVerified || false;
+    const dbEmailVerified = userData.emailVerified;
 
-    if (authEmailVerified !== firestoreEmailVerified) {
+    if (authEmailVerified !== dbEmailVerified) {
       console.log(
-        `Syncing profile email verification: Firebase Auth=${authEmailVerified}, Firestore=${firestoreEmailVerified}`,
+        `Syncing profile email verification: Firebase Auth=${authEmailVerified}, DB=${dbEmailVerified}`,
       );
 
-      // Update Firestore
-      await this.firebaseService.firestore.collection('users').doc(uid).update({
+      await this.usersRepository.update(uid, {
         emailVerified: authEmailVerified,
-        updatedAt: FieldValue.serverTimestamp(),
       });
-
-      // Update local userData
-      userData.emailVerified = authEmailVerified;
     }
 
-    // Convert Firestore Timestamps to ISO 8601 strings
-    return convertCommonTimestamps(
-      userData as unknown as Record<string, unknown>,
-    ) as unknown as User;
+    // timestamptz columns serialize to ISO 8601 natively — no conversion needed.
+    // Override emailVerified without mutating the repository's row object.
+    return {
+      ...userData,
+      emailVerified: authEmailVerified,
+    } as unknown as User;
   }
 
   async updateProfile(
     uid: string,
     updateProfileDto: UpdateProfileDto,
   ): Promise<User> {
-    const updateData: any = {
-      ...updateProfileDto,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
-
     // Update Firebase Auth
     await this.firebaseService.auth.updateUser(uid, updateProfileDto);
 
-    // Update Firestore
-    await this.firebaseService.firestore
-      .collection('users')
-      .doc(uid)
-      .update(updateData);
+    // Update the Postgres user row (updated_at is bumped by the repository)
+    await this.usersRepository.update(uid, updateProfileDto);
 
     return this.getProfile(uid);
   }
@@ -415,19 +389,8 @@ export class AuthService {
 
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
-      const userDoc = await this.firebaseService.firestore
-        .collection('users')
-        .doc(uid)
-        .get();
-
-      if (userDoc.exists) {
-        await this.firebaseService.firestore
-          .collection('users')
-          .doc(uid)
-          .update({
-            lastLogout: FieldValue.serverTimestamp(),
-          });
-      }
+      // No-op if the row doesn't exist (matches the prior exists-check).
+      await this.usersRepository.setLastLogout(uid);
 
       return { message: 'Successfully logged out' };
     } catch (error) {
@@ -442,68 +405,22 @@ export class AuthService {
     query: string,
     limit: number = 10,
   ): Promise<SearchUserResponse> {
+    // Reject blank/too-short queries (a bare query would match everyone and
+    // enable user enumeration) and clamp the page size.
+    const trimmedQuery = query?.trim() ?? '';
+    if (trimmedQuery.length < 2) {
+      throw new BadRequestException(
+        'Search query must be at least 2 characters',
+      );
+    }
+    const safeLimit = Math.min(Math.max(Math.trunc(limit) || 10, 1), 100);
+
     try {
-      const normalizedQuery = query.toLowerCase().trim();
-
-      // Search by display name (case-insensitive)
-      const displayNameQuery = this.firebaseService.firestore
-        .collection('users')
-        .where('displayName', '>=', query)
-        .where('displayName', '<=', query + '\uf8ff')
-        .limit(limit);
-
-      // Search by email (case-insensitive)
-      const emailQuery = this.firebaseService.firestore
-        .collection('users')
-        .where('email', '>=', normalizedQuery)
-        .where('email', '<=', normalizedQuery + '\uf8ff')
-        .limit(limit);
-
-      // Execute both queries in parallel
-      const [displayNameSnapshot, emailSnapshot] = await Promise.all([
-        displayNameQuery.get(),
-        emailQuery.get(),
-      ]);
-
-      // Combine results and remove duplicates
-      const userMap = new Map<string, SearchUserResult>();
-
-      // Process display name results
-      displayNameSnapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        if (data.displayName?.toLowerCase().includes(normalizedQuery)) {
-          userMap.set(doc.id, {
-            uid: doc.id,
-
-            email: (data.email as string) || '',
-
-            displayName: (data.displayName as string) || '',
-
-            phoneNumber: data.phoneNumber as string,
-          });
-        }
-      });
-
-      // Process email results
-      emailSnapshot.docs.forEach((doc) => {
-        const data = doc.data();
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        if (data.email?.toLowerCase().includes(normalizedQuery)) {
-          userMap.set(doc.id, {
-            uid: doc.id,
-
-            email: (data.email as string) || '',
-
-            displayName: (data.displayName as string) || '',
-
-            phoneNumber: data.phoneNumber as string,
-          });
-        }
-      });
-
-      // Convert to array and apply limit
-      const users = Array.from(userMap.values()).slice(0, limit);
+      // Case-insensitive substring match over name + email (pg_trgm-backed).
+      const users: SearchUserResult[] = await this.usersRepository.search(
+        trimmedQuery,
+        safeLimit,
+      );
 
       return {
         users,
@@ -511,7 +428,7 @@ export class AuthService {
       };
     } catch (error) {
       console.error('User search error:', error);
-      throw new Error('Failed to search users');
+      throw new InternalServerErrorException('Failed to search users');
     }
   }
 
@@ -575,14 +492,10 @@ export class AuthService {
           userRecord.email,
         );
 
-      // Get user's display name from Firestore for personalized email
-      const userDoc = await this.firebaseService.firestore
-        .collection('users')
-        .doc(uid)
-        .get();
-
-      const userData = userDoc.data();
-      const displayName = userData?.displayName || userRecord.displayName;
+      // Get user's display name from Postgres for personalized email
+      const userData = await this.usersRepository.findById(uid);
+      const displayName =
+        userData?.displayName || userRecord.displayName || 'there';
 
       // Send email using our email service
       const emailSent = await this.emailService.sendVerificationEmail(
@@ -636,14 +549,10 @@ export class AuthService {
         emailVerified: true,
       });
 
-      // Update Firestore
-      await this.firebaseService.firestore
-        .collection('users')
-        .doc(userRecord.uid)
-        .update({
-          emailVerified: true,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+      // Update the Postgres user row
+      await this.usersRepository.update(userRecord.uid, {
+        emailVerified: true,
+      });
 
       return {
         success: true,
@@ -670,14 +579,10 @@ export class AuthService {
       const link =
         await this.firebaseService.auth.generatePasswordResetLink(email);
 
-      // Get user's display name from Firestore for personalized email
-      const userDoc = await this.firebaseService.firestore
-        .collection('users')
-        .doc(userRecord.uid)
-        .get();
-
-      const userData = userDoc.data();
-      const displayName = userData?.displayName || userRecord.displayName;
+      // Get user's display name from Postgres for personalized email
+      const userData = await this.usersRepository.findById(userRecord.uid);
+      const displayName =
+        userData?.displayName || userRecord.displayName || 'there';
 
       // Send branded password reset email
       const emailSent = await this.emailService.sendPasswordResetEmail(
@@ -734,14 +639,9 @@ export class AuthService {
         throw new Error('Invalid password reset code');
       }
 
-      // Update timestamp in Firestore
+      // Bump updated_at on the Postgres user row
       const userRecord = await this.firebaseService.auth.getUserByEmail(email);
-      await this.firebaseService.firestore
-        .collection('users')
-        .doc(userRecord.uid)
-        .update({
-          updatedAt: FieldValue.serverTimestamp(),
-        });
+      await this.usersRepository.update(userRecord.uid, {});
 
       return {
         success: true,

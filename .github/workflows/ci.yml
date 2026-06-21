@@ -25,6 +25,28 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: tulink
+          POSTGRES_PASSWORD: tulink_ci
+          POSTGRES_DB: tulink
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tulink -d tulink"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      # Used by drizzle-kit migrate and any DB-backed tests.
+      DATABASE_URL: postgresql://tulink:tulink_ci@localhost:5432/tulink
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: tulink
+      POSTGRES_PASSWORD: tulink_ci
+      POSTGRES_DB: tulink
 
     steps:
       - name: Checkout code
@@ -44,6 +66,10 @@ jobs:
 
       - name: Run type check
         run: npm run typecheck
+
+      - name: Apply database migrations
+        # Validates that the Drizzle migrations apply cleanly against PostGIS.
+        run: npm run db:migrate
 
       - name: Run tests
         run: npm test
@@ -193,8 +219,16 @@ jobs:
 
             cd /root/tulink-backend
 
-            # Rebuild and restart api-dev only (Redis keeps running)
+            # Rebuild and restart api-dev (also starts the postgres + redis
+            # dependencies declared via depends_on)
             docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --build --remove-orphans api-dev
+
+            # Apply database migrations from inside the api-dev container (dev
+            # image ships drizzle-kit + migrations). Targets the internal
+            # postgres host; credentials come from the container env_file.
+            echo "Applying database migrations..."
+            docker compose -f config/docker/docker-compose.dev.yml --profile server exec -T api-dev \
+              sh -c 'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" npm run db:migrate'
 
             # Wait for Docker's own health check to pass (port is internal, can't curl from host)
             echo "Waiting for api-dev to be healthy..."

@@ -1,4 +1,3 @@
-import { Timestamp, GeoPoint } from 'firebase-admin/firestore';
 import { JourneyStatus } from '../../types/journey-status.type';
 
 export interface Journey {
@@ -6,13 +5,13 @@ export interface Journey {
   name: string;
   leaderId: string;
   status: JourneyStatus;
-  startTime?: Timestamp;
-  endTime?: Timestamp;
-  destination?: GeoPoint;
+  startTime?: Date;
+  endTime?: Date;
+  destination?: { latitude: number; longitude: number };
   destinationAddress?: string;
   lagThresholdMeters: number;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
+  createdAt: Date;
+  updatedAt: Date;
   metadata: {
     totalDistance?: number;
     estimatedDuration?: number;

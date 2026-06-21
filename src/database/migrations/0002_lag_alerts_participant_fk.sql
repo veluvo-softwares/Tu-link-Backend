@@ -1,0 +1,1 @@
+ALTER TABLE "lag_alerts" ADD CONSTRAINT "lag_alerts_journey_id_participant_id_participants_journey_id_user_id_fk" FOREIGN KEY ("journey_id","participant_id") REFERENCES "public"."participants"("journey_id","user_id") ON DELETE cascade ON UPDATE no action;

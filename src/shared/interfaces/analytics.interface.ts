@@ -1,10 +1,8 @@
-import { Timestamp } from 'firebase-admin/firestore';
-
 export interface JourneyAnalytics {
   id: string;
   journeyId: string;
-  startTime: Timestamp;
-  endTime?: Timestamp;
+  startTime: Date;
+  endTime?: Date;
   totalDuration?: number;
   totalDistance: number;
   averageSpeed: number;

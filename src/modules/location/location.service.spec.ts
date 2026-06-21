@@ -3,7 +3,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import { LocationService } from './location.service';
-import { FirebaseService } from '../../shared/firebase/firebase.service';
+import { LocationRepository } from '../../database/repositories/location.repository';
 import { RedisService } from '../../shared/redis/redis.service';
 import { JourneyService } from '../journey/journey.service';
 import { ParticipantService } from '../journey/services/participant.service';
@@ -14,9 +14,9 @@ import { LagDetectionService } from './services/lag-detection.service';
 import { ArrivalDetectionService } from './services/arrival-detection.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 
-describe('LocationService - Redis/Firestore', () => {
+describe('LocationService - Redis/Postgres', () => {
   let service: LocationService;
-  let firebaseService: jest.Mocked<FirebaseService>;
+  let locationRepository: jest.Mocked<LocationRepository>;
   let redisService: jest.Mocked<RedisService>;
   let priorityService: jest.Mocked<PriorityService>;
   let sequenceService: jest.Mocked<SequenceService>;
@@ -55,28 +55,12 @@ describe('LocationService - Redis/Firestore', () => {
   };
 
   beforeEach(async () => {
-    const mockFirebaseService = {
-      firestore: {
-        collection: jest.fn(() => ({
-          doc: jest.fn(() => ({
-            collection: jest.fn(() => ({
-              doc: jest.fn(() => ({
-                set: jest.fn().mockResolvedValue(undefined),
-              })),
-              where: jest.fn(() => ({
-                orderBy: jest.fn(() => ({
-                  limit: jest.fn(() => ({
-                    get: jest.fn().mockResolvedValue({
-                      empty: true,
-                      docs: [],
-                    }),
-                  })),
-                })),
-              })),
-            })),
-          })),
-        })),
-      },
+    const mockLocationRepository = {
+      append: jest.fn().mockResolvedValue(undefined),
+      getLatestPerParticipant: jest.fn().mockResolvedValue([]),
+      getParticipantHistory: jest.fn().mockResolvedValue([]),
+      getSinceSequence: jest.fn().mockResolvedValue([]),
+      getLastForParticipant: jest.fn().mockResolvedValue(null),
     };
 
     const mockRedisClient = {
@@ -96,8 +80,8 @@ describe('LocationService - Redis/Firestore', () => {
       providers: [
         LocationService,
         {
-          provide: FirebaseService,
-          useValue: mockFirebaseService,
+          provide: LocationRepository,
+          useValue: mockLocationRepository,
         },
         {
           provide: RedisService,
@@ -164,7 +148,7 @@ describe('LocationService - Redis/Firestore', () => {
     }).compile();
 
     service = module.get<LocationService>(LocationService);
-    firebaseService = module.get(FirebaseService);
+    locationRepository = module.get(LocationRepository);
     redisService = module.get(RedisService);
     priorityService = module.get(PriorityService);
     sequenceService = module.get(SequenceService);
@@ -210,34 +194,11 @@ describe('LocationService - Redis/Firestore', () => {
       );
     });
 
-    it('should not throw when Firestore persistence fails', async () => {
-      // Mock Firestore to reject
-      const firestoreError = new Error('Firestore connection failed');
-      const mockSet = jest.fn().mockRejectedValue(firestoreError);
-
-      const mockFirestore = {
-        collection: jest.fn(() => ({
-          doc: jest.fn(() => ({
-            collection: jest.fn(() => ({
-              doc: jest.fn(() => ({
-                set: mockSet,
-              })),
-              where: jest.fn(() => ({
-                orderBy: jest.fn(() => ({
-                  limit: jest.fn(() => ({
-                    get: jest.fn().mockResolvedValue({
-                      empty: true,
-                      docs: [],
-                    }),
-                  })),
-                })),
-              })),
-            })),
-          })),
-        })),
-      };
-
-      firebaseService.firestore = mockFirestore as any;
+    it('should not throw when location persistence fails', async () => {
+      // Mock the repository append to reject
+      locationRepository.append.mockRejectedValueOnce(
+        new Error('Postgres connection failed'),
+      );
 
       // Mock console.error to verify logging
       const consoleSpy = jest
@@ -252,44 +213,22 @@ describe('LocationService - Redis/Firestore', () => {
       expect(result.success).toBe(true);
       expect(result.sequenceNumber).toBe(42);
 
-      // Give async Firestore operation time to fail and be caught
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Flush the microtask queue so the rejected persist promise's .catch runs
+      // (deterministic — no arbitrary timer that can flake on slow CI).
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Firestore persist failed for user user-123'),
+        expect.stringContaining('Location persist failed for user user-123'),
         expect.anything(),
       );
 
       consoleSpy.mockRestore();
     });
 
-    it('should log Firestore failures with userId', async () => {
-      const firestoreError = new Error('Database timeout');
-      const mockSet = jest.fn().mockRejectedValue(firestoreError);
-
-      const mockFirestore = {
-        collection: jest.fn(() => ({
-          doc: jest.fn(() => ({
-            collection: jest.fn(() => ({
-              doc: jest.fn(() => ({
-                set: mockSet,
-              })),
-              where: jest.fn(() => ({
-                orderBy: jest.fn(() => ({
-                  limit: jest.fn(() => ({
-                    get: jest.fn().mockResolvedValue({
-                      empty: true,
-                      docs: [],
-                    }),
-                  })),
-                })),
-              })),
-            })),
-          })),
-        })),
-      };
-
-      firebaseService.firestore = mockFirestore as any;
+    it('should log location persist failures with userId', async () => {
+      locationRepository.append.mockRejectedValueOnce(
+        new Error('Database timeout'),
+      );
 
       const consoleSpy = jest
         .spyOn(console, 'error')
@@ -297,11 +236,11 @@ describe('LocationService - Redis/Firestore', () => {
 
       await service.processLocationUpdate('user-456', mockLocationDto);
 
-      // Wait for async operation
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Flush the microtask queue so the rejected persist promise's .catch runs.
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(consoleSpy).toHaveBeenCalledWith(
-        'Firestore persist failed for user user-456: Database timeout',
+        'Location persist failed for user user-456: Database timeout',
         expect.anything(),
       );
 

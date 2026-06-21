@@ -1,19 +1,16 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   Injectable,
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { FirebaseService } from '../../../shared/firebase/firebase.service';
 import { RedisService } from '../../../shared/redis/redis.service';
+import { ParticipantRepository } from '../../../database/repositories/participant.repository';
 import { Participant } from '../../../shared/interfaces/participant.interface';
-import { FieldValue } from 'firebase-admin/firestore';
 
 @Injectable()
 export class ParticipantService {
   constructor(
-    private firebaseService: FirebaseService,
+    private participantRepository: ParticipantRepository,
     private redisService: RedisService,
   ) {}
 
@@ -23,147 +20,108 @@ export class ParticipantService {
     invitedBy: string,
     role: 'LEADER' | 'FOLLOWER' = 'FOLLOWER',
   ): Promise<Participant> {
-    const participantRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId);
-
-    const participantData: any = {
-      userId,
+    const participant = await this.participantRepository.add({
       journeyId,
+      userId,
+      invitedBy,
       role,
       status: role === 'LEADER' ? 'ACTIVE' : 'INVITED',
-      invitedBy,
-      connectionStatus: 'DISCONNECTED',
-    };
-
-    // Only add joinedAt for leader (invited followers get it when they accept)
-    if (role === 'LEADER') {
-      participantData.joinedAt = FieldValue.serverTimestamp();
-    }
-
-    await participantRef.set(participantData);
+      // Leader joins immediately; invited followers get joinedAt on accept.
+      setJoinedAt: role === 'LEADER',
+    });
 
     // Update Redis if it's the leader
     if (role === 'LEADER') {
       await this.redisService.setJourneyLeader(journeyId, userId);
     }
 
-    return { id: userId, ...participantData } as Participant;
+    return participant as unknown as Participant;
   }
 
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
-    const participantRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId);
-
-    const participantDoc = await participantRef.get();
-    if (!participantDoc.exists) {
+    const updated = await this.participantRepository.accept(journeyId, userId);
+    if (!updated) {
       throw new NotFoundException('Invitation not found');
     }
-
-    await participantRef.update({
-      status: 'ACCEPTED',
-      joinedAt: FieldValue.serverTimestamp(),
-    });
   }
 
   async declineInvitation(journeyId: string, userId: string): Promise<void> {
-    const participantRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId);
-
-    const participantDoc = await participantRef.get();
-    if (!participantDoc.exists) {
+    const updated = await this.participantRepository.decline(journeyId, userId);
+    if (!updated) {
       throw new NotFoundException('Invitation not found');
     }
-
-    await participantRef.update({
-      status: 'DECLINED',
-    });
   }
 
   async leaveJourney(journeyId: string, userId: string): Promise<void> {
-    const participantRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId);
-
-    const participantDoc = await participantRef.get();
-    if (!participantDoc.exists) {
+    const participant = await this.participantRepository.findOne(
+      journeyId,
+      userId,
+    );
+    if (!participant) {
       throw new NotFoundException('Participant not found');
     }
-
-    const participant = participantDoc.data() as Participant;
     if (participant.role === 'LEADER') {
       throw new ForbiddenException('Leader cannot leave journey');
     }
 
-    await participantRef.update({
-      status: 'LEFT',
-      leftAt: FieldValue.serverTimestamp(),
-    });
+    await this.participantRepository.leave(journeyId, userId);
 
     // Remove from Redis
     await this.redisService.removeJourneyParticipant(journeyId, userId);
   }
 
   async getJourneyParticipants(journeyId: string): Promise<Participant[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .get();
+    // Repository JOINs users.display_name in one query (no per-participant fetch).
+    const participants =
+      await this.participantRepository.findByJourney(journeyId);
+    return participants as unknown as Participant[];
+  }
 
-    const participants = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Participant[];
-
-    // Fetch user details for each participant to include displayName
-    const enrichedParticipants = await Promise.all(
-      participants.map(async (participant) => {
-        try {
-          const userDoc = await this.firebaseService.firestore
-            .collection('users')
-            .doc(participant.userId)
-            .get();
-
-          const userData = userDoc.data();
-          return {
-            ...participant,
-            displayName: (userData?.displayName as string) || 'Unknown User',
-          };
-        } catch (error) {
-          // If user fetch fails, return participant with fallback displayName
-          console.error(`Failed to fetch user ${participant.userId}:`, error);
-          return {
-            ...participant,
-            displayName: 'Unknown User',
-          };
-        }
-      }),
+  async getParticipant(
+    journeyId: string,
+    userId: string,
+  ): Promise<Participant | null> {
+    const participant = await this.participantRepository.findOne(
+      journeyId,
+      userId,
     );
+    return participant as unknown as Participant | null;
+  }
 
-    return enrichedParticipants;
+  // Participant records for a user across journeys (replaces collectionGroup).
+  async getUserParticipations(
+    userId: string,
+    statuses?: ('INVITED' | 'ACCEPTED' | 'ACTIVE' | 'ARRIVED' | 'LEFT')[],
+  ): Promise<Participant[]> {
+    const participants = await this.participantRepository.findByUser(
+      userId,
+      statuses,
+    );
+    return participants as unknown as Participant[];
+  }
+
+  // Active-journey accept path: promote an existing invite straight to ACTIVE.
+  async markActive(journeyId: string, userId: string): Promise<void> {
+    const updated = await this.participantRepository.activate(
+      journeyId,
+      userId,
+    );
+    if (!updated) {
+      throw new NotFoundException('Invitation not found');
+    }
+  }
+
+  // journey.start(): bulk-promote ACCEPTED participants + the leader to ACTIVE.
+  async activateForStart(journeyId: string): Promise<void> {
+    await this.participantRepository.activateForStart(journeyId);
   }
 
   async isParticipant(journeyId: string, userId: string): Promise<boolean> {
-    const participantDoc = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId)
-      .get();
-
-    if (!participantDoc.exists) return false;
-    const participant = participantDoc.data() as Participant;
+    const participant = await this.participantRepository.findOne(
+      journeyId,
+      userId,
+    );
+    if (!participant) return false;
     return (
       ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(participant.status) ||
       participant.role === 'LEADER'
@@ -174,16 +132,11 @@ export class ParticipantService {
     journeyId: string,
     userId: string,
   ): Promise<boolean> {
-    const participantDoc = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId)
-      .get();
-
-    if (!participantDoc.exists) return false;
-
-    const participant = participantDoc.data() as Participant;
+    const participant = await this.participantRepository.findOne(
+      journeyId,
+      userId,
+    );
+    if (!participant) return false;
     return participant.status === 'ACTIVE' || participant.status === 'ACCEPTED';
   }
 
@@ -192,14 +145,10 @@ export class ParticipantService {
     userId: string,
     status: 'CONNECTED' | 'DISCONNECTED' | 'RECONNECTING',
   ): Promise<void> {
-    await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .doc(userId)
-      .update({
-        connectionStatus: status,
-        lastSeenAt: FieldValue.serverTimestamp(),
-      });
+    await this.participantRepository.setConnectionStatus(
+      journeyId,
+      userId,
+      status,
+    );
   }
 }

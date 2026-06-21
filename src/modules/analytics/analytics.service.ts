@@ -1,19 +1,24 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
-/* eslint-disable @typescript-eslint/no-unsafe-return */
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import { Injectable } from '@nestjs/common';
-import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { JourneyAnalytics } from '../../shared/interfaces/analytics.interface';
-import { LocationHistory } from '../../shared/interfaces/location.interface';
-import { Journey } from '../../shared/interfaces/journey.interface';
 import { DistanceUtils } from '../../common/utils/distance.utils';
-import { FieldValue } from 'firebase-admin/firestore';
+import { AnalyticsRepository } from '../../database/repositories/analytics.repository';
+import { JourneyRepository } from '../../database/repositories/journey.repository';
+import {
+  LocationRecord,
+  LocationRepository,
+} from '../../database/repositories/location.repository';
+import { LagAlertRepository } from '../../database/repositories/lag-alert.repository';
+import { ParticipantRepository } from '../../database/repositories/participant.repository';
 
 @Injectable()
 export class AnalyticsService {
-  constructor(private firebaseService: FirebaseService) {}
+  constructor(
+    private analyticsRepository: AnalyticsRepository,
+    private journeyRepository: JourneyRepository,
+    private locationRepository: LocationRepository,
+    private lagAlertRepository: LagAlertRepository,
+    private participantRepository: ParticipantRepository,
+  ) {}
 
   /**
    * Calculate and store analytics when a journey ends
@@ -21,64 +26,46 @@ export class AnalyticsService {
   async calculateJourneyAnalytics(
     journeyId: string,
   ): Promise<JourneyAnalytics> {
-    // Get journey data
-    const journeyDoc = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .get();
-
-    if (!journeyDoc.exists) {
+    const journey = await this.journeyRepository.findById(journeyId);
+    if (!journey) {
       throw new Error('Journey not found');
     }
 
-    const journey = { id: journeyDoc.id, ...journeyDoc.data() } as Journey;
+    // All location updates for this journey, oldest first
+    const locations = await this.locationRepository.getAllForJourney(journeyId);
 
-    // Get all location updates for this journey
-    const locationsSnapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('locations')
-      .orderBy('timestamp', 'asc')
-      .get();
-
-    const locations = locationsSnapshot.docs.map(
-      (doc) => ({ id: doc.id, ...doc.data() }) as LocationHistory,
+    // Route metrics (distance, speed, stops, polyline) describe the journey's
+    // path, so they must run over a single participant's track. Mixing every
+    // participant's rows (interleaved by createdAt) produces meaningless
+    // jumps between people. Use the leader's locations as the canonical route.
+    const leaderLocations = locations.filter(
+      (loc) => loc.participantId === journey.leaderId,
     );
 
-    // Get all lag alerts
-    const lagAlertsSnapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('lag_alerts')
-      .get();
-
-    // Get participant count
-    const participantsSnapshot = await this.firebaseService.firestore
-      .collection('journeys')
-      .doc(journeyId)
-      .collection('participants')
-      .get();
+    // All lag alerts + participant rows
+    const lagAlerts = await this.lagAlertRepository.getByJourney(journeyId);
+    const participants =
+      await this.participantRepository.findByJourney(journeyId);
 
     // Calculate metrics
-    const totalDistance = this.calculateTotalDistance(locations);
-    const averageSpeed = this.calculateAverageSpeed(locations);
-    const maxLagDistance = this.calculateMaxLagDistance(lagAlertsSnapshot.docs);
-    const lagAlertCount = lagAlertsSnapshot.size;
-    const participantCount = participantsSnapshot.size;
-    const stats = this.calculateStats(locations);
+    const totalDistance = this.calculateTotalDistance(leaderLocations);
+    const averageSpeed = this.calculateAverageSpeed(leaderLocations);
+    const maxLagDistance = this.calculateMaxLagDistance(lagAlerts);
+    const lagAlertCount = lagAlerts.length;
+    const participantCount = participants.length;
+    const stats = this.calculateStats(leaderLocations);
 
     // Calculate duration
     const startTime = journey.startTime;
     const endTime = journey.endTime;
     const totalDuration =
       startTime && endTime
-        ? (endTime.toMillis() - startTime.toMillis()) / 1000
+        ? (endTime.getTime() - startTime.getTime()) / 1000
         : 0;
 
-    // Create analytics document
-    const analyticsData = {
+    const analytics = await this.analyticsRepository.upsert({
       journeyId,
-      startTime: journey.startTime || (FieldValue.serverTimestamp() as any),
+      startTime: journey.startTime,
       endTime: journey.endTime,
       totalDuration,
       totalDistance,
@@ -86,17 +73,11 @@ export class AnalyticsService {
       maxLagDistance,
       lagAlertCount,
       participantCount,
-      routePolyline: this.encodeRoutePolyline(locations),
+      routePolyline: this.encodeRoutePolyline(leaderLocations),
       stats,
-    };
+    });
 
-    // Store in Firestore
-    await this.firebaseService.firestore
-      .collection('analytics')
-      .doc(journeyId)
-      .set(analyticsData);
-
-    return { id: journeyId, ...analyticsData } as JourneyAnalytics;
+    return analytics as unknown as JourneyAnalytics;
   }
 
   /**
@@ -105,16 +86,8 @@ export class AnalyticsService {
   async getJourneyAnalytics(
     journeyId: string,
   ): Promise<JourneyAnalytics | null> {
-    const analyticsDoc = await this.firebaseService.firestore
-      .collection('analytics')
-      .doc(journeyId)
-      .get();
-
-    if (!analyticsDoc.exists) {
-      return null;
-    }
-
-    return { id: analyticsDoc.id, ...analyticsDoc.data() } as JourneyAnalytics;
+    const analytics = await this.analyticsRepository.findByJourneyId(journeyId);
+    return analytics as unknown as JourneyAnalytics | null;
   }
 
   /**
@@ -124,65 +97,40 @@ export class AnalyticsService {
     userId: string,
     limit: number = 20,
   ): Promise<any[]> {
-    // 1) Find all journey IDs where the user was a participant.
-    //    collectionGroup('participants') gives us participant docs across
-    //    every journey; the parent ref is the journey doc.
-    const participantsSnapshot = await this.firebaseService.firestore
-      .collectionGroup('participants')
-      .where('userId', '==', userId)
-      .get();
-
+    // 1) All journey IDs where the user was a participant (replaces
+    //    collectionGroup('participants')).
+    const participations = await this.participantRepository.findByUser(userId);
     const journeyIds = Array.from(
-      new Set(
-        participantsSnapshot.docs
-          .map((doc) => doc.ref.parent.parent?.id)
-          .filter((id): id is string => id !== undefined),
-      ),
+      new Set(participations.map((p) => p.journeyId)),
     );
 
     if (journeyIds.length === 0) return [];
 
-    // 2) Fetch every journey doc in parallel. This is the slowest part of
-    //    the request; sequential fetches were the source of the N+1.
-    //    For users with hundreds of journeys this could be batched into
-    //    Firestore 'in' queries (10 IDs per query), but at current scale
-    //    (~20-30 journeys per user) the parallel-fetch pattern is fine.
-    const journeyDocs = await Promise.all(
-      journeyIds.map((id) =>
-        this.firebaseService.firestore.collection('journeys').doc(id).get(),
-      ),
+    // 2) Fetch every journey in parallel, drop any that no longer exist.
+    const journeyResults = await Promise.all(
+      journeyIds.map((id) => this.journeyRepository.findById(id)),
     );
 
-    // 3) Filter to existing docs, then sort by createdAt desc BEFORE slicing.
-    //    This is the fix: previously the slice happened before the sort, so
-    //    newly created/completed journeys outside the arbitrary first N
-    //    Firestore returned were silently dropped.
-    const sortedJourneys = journeyDocs
-      .filter((doc) => doc.exists)
-      .map((doc) => ({ id: doc.id, ...doc.data() }) as any)
-      .sort((a, b) => {
-        // Defensive: a missing createdAt sorts to the bottom rather than
-        // throwing. In practice createdAt is always set at journey creation.
-        const aTime = a.createdAt?.toMillis?.() ?? 0;
-        const bTime = b.createdAt?.toMillis?.() ?? 0;
-        return bTime - aTime;
-      })
+    // 3) Sort by createdAt desc BEFORE slicing so the most recent journeys
+    //    survive the limit.
+    const sortedJourneys = journeyResults
+      .filter((journey): journey is NonNullable<typeof journey> => !!journey)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
 
-    // 4) Fetch analytics for the limited set in parallel. Analytics is null
-    //    for journeys that never started (PENDING) or where the post-trip
-    //    calculation hasn't run yet — both are valid states the client
-    //    already handles.
-    const analyticsResults = await Promise.all(
-      sortedJourneys.map((journey) => this.getJourneyAnalytics(journey.id)),
+    // 4) Batch-fetch analytics for the limited set (one query) and key by id.
+    const analyticsList = await this.analyticsRepository.findByJourneyIds(
+      sortedJourneys.map((j) => j.id),
+    );
+    const analyticsByJourney = new Map(
+      analyticsList.map((a) => [a.journeyId, a]),
     );
 
-    return sortedJourneys.map((journey, index) => {
-      const analytics = analyticsResults[index];
-      // The list endpoint omits routePolyline because it can be ~30 KB per
-      // journey and the home screen / history list don't render it. Clients
-      // that need the polyline (e.g. JourneyDetailsScreen) fetch it via
-      // GET /analytics/journeys/:id, which returns the full analytics doc.
+    return sortedJourneys.map((journey) => {
+      const analytics = analyticsByJourney.get(journey.id);
+      // The list endpoint omits routePolyline (can be ~30 KB per journey and
+      // the history list doesn't render it). Clients that need it fetch the
+      // full doc via GET /analytics/journeys/:id.
       const listAnalytics = analytics
         ? // eslint-disable-next-line @typescript-eslint/no-unused-vars
           (({ routePolyline, ...rest }) => rest)(analytics)
@@ -194,7 +142,7 @@ export class AnalyticsService {
   /**
    * Calculate total distance traveled
    */
-  private calculateTotalDistance(locations: LocationHistory[]): number {
+  private calculateTotalDistance(locations: LocationRecord[]): number {
     if (locations.length < 2) return 0;
 
     let totalDistance = 0;
@@ -223,13 +171,12 @@ export class AnalyticsService {
   /**
    * Calculate average speed
    */
-  private calculateAverageSpeed(locations: LocationHistory[]): number {
+  private calculateAverageSpeed(locations: LocationRecord[]): number {
     if (locations.length === 0) return 0;
 
     const speeds = locations
-      .filter((loc) => loc.speed !== undefined && loc.speed > 0)
-      .map((loc) => loc.speed!)
-      .filter((speed): speed is number => speed !== undefined);
+      .map((loc) => loc.speed)
+      .filter((speed): speed is number => speed != null && speed > 0);
 
     if (speeds.length === 0) return 0;
 
@@ -240,18 +187,18 @@ export class AnalyticsService {
   /**
    * Calculate maximum lag distance
    */
-  private calculateMaxLagDistance(lagAlerts: any[]): number {
+  private calculateMaxLagDistance(
+    lagAlerts: { distanceFromLeader: number }[],
+  ): number {
     if (lagAlerts.length === 0) return 0;
 
-    return Math.max(
-      ...lagAlerts.map((alert) => alert.data().distanceFromLeader || 0),
-    );
+    return Math.max(...lagAlerts.map((alert) => alert.distanceFromLeader || 0));
   }
 
   /**
    * Calculate additional statistics
    */
-  private calculateStats(locations: LocationHistory[]): {
+  private calculateStats(locations: LocationRecord[]): {
     leaderStops: number;
     avgFollowerLag: number;
     connectionDrops: number;
@@ -278,7 +225,7 @@ export class AnalyticsService {
   /**
    * Encode route as polyline (simplified version)
    */
-  private encodeRoutePolyline(locations: LocationHistory[]): string {
+  private encodeRoutePolyline(locations: LocationRecord[]): string {
     // Simplified: just store as JSON string
     // In production, use proper polyline encoding algorithm
     const points = locations.map((loc) => ({

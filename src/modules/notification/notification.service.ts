@@ -4,30 +4,21 @@ import {
   BadRequestException,
   Logger,
 } from '@nestjs/common';
-import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { FcmService } from './services/fcm.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
 import { Notification } from '../../shared/interfaces/notification.interface';
-import { FieldValue, DocumentSnapshot } from 'firebase-admin/firestore';
-
-interface FcmTokenData {
-  token: string;
-  platform: string;
-  deviceId?: string | null;
-  registeredAt: string;
-}
-
-interface UserDataWithTokens {
-  fcmTokens?: FcmTokenData[];
-  [key: string]: unknown;
-}
+import { NotificationRepository } from '../../database/repositories/notification.repository';
+import { FcmTokenRepository } from '../../database/repositories/fcm-token.repository';
+import { UsersRepository } from '../../database/repositories/users.repository';
 
 @Injectable()
 export class NotificationService {
   private readonly logger = new Logger(NotificationService.name);
 
   constructor(
-    private firebaseService: FirebaseService,
+    private notificationRepository: NotificationRepository,
+    private fcmTokenRepository: FcmTokenRepository,
+    private usersRepository: UsersRepository,
     private fcmService: FcmService,
   ) {}
 
@@ -37,24 +28,14 @@ export class NotificationService {
   async createNotification(
     createNotificationDto: CreateNotificationDto,
   ): Promise<Notification> {
-    const notificationRef = this.firebaseService.firestore
-      .collection('journeys')
-      .doc(createNotificationDto.journeyId)
-      .collection('notifications')
-      .doc();
-
-    const notificationData = {
+    const notification = await this.notificationRepository.create({
       journeyId: createNotificationDto.journeyId,
       recipientId: createNotificationDto.recipientId,
       type: createNotificationDto.type,
       title: createNotificationDto.title,
       body: createNotificationDto.body,
       data: createNotificationDto.data,
-      read: false,
-      createdAt: FieldValue.serverTimestamp(),
-    };
-
-    await notificationRef.set(notificationData);
+    });
 
     // Send FCM push notification
     const userTokens = await this.getUserFcmTokens(
@@ -66,7 +47,7 @@ export class NotificationService {
       data: this.convertDataToStringRecord(createNotificationDto.data),
     });
 
-    return { id: notificationRef.id, ...notificationData } as Notification;
+    return notification as unknown as Notification;
   }
 
   /**
@@ -208,17 +189,11 @@ export class NotificationService {
     userId: string,
     limit: number = 50,
   ): Promise<Notification[]> {
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('notifications')
-      .where('recipientId', '==', userId)
-      .orderBy('createdAt', 'desc')
-      .limit(limit)
-      .get();
-
-    return snapshot.docs.map((doc: DocumentSnapshot) => ({
-      id: doc.id,
-      ...doc.data(),
-    })) as Notification[];
+    const notifications = await this.notificationRepository.findByRecipient(
+      userId,
+      limit,
+    );
+    return notifications as unknown as Notification[];
   }
 
   /**
@@ -226,28 +201,18 @@ export class NotificationService {
    * Uses recipientId to scope query and prevent unauthorized access (IDOR protection)
    */
   async markAsRead(notificationId: string, userId: string): Promise<void> {
-    // Query scoped to user's notifications only for security and performance
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('notifications')
-      .where('recipientId', '==', userId)
-      .limit(1000) // Reasonable limit per user
-      .get();
-
-    // Find the specific notification by ID
-    const notificationDoc = snapshot.docs.find(
-      (doc: DocumentSnapshot) => doc.id === notificationId,
+    // Keyed update scoped by recipient (IDOR protection). Returns false when
+    // nothing matched.
+    const updated = await this.notificationRepository.markAsRead(
+      notificationId,
+      userId,
     );
 
-    if (!notificationDoc) {
+    if (!updated) {
       throw new NotFoundException(
         'Notification not found or you do not have permission to access it',
       );
     }
-
-    await notificationDoc.ref.update({
-      read: true,
-      readAt: FieldValue.serverTimestamp(),
-    });
   }
 
   /**
@@ -258,38 +223,24 @@ export class NotificationService {
     notificationId: string,
     userId: string,
   ): Promise<void> {
-    // Query scoped to user's notifications only for security and performance
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('notifications')
-      .where('recipientId', '==', userId)
-      .limit(1000) // Reasonable limit per user
-      .get();
-
-    // Find the specific notification by ID
-    const notificationDoc = snapshot.docs.find(
-      (doc: DocumentSnapshot) => doc.id === notificationId,
+    // Keyed delete scoped by recipient (IDOR protection).
+    const deleted = await this.notificationRepository.delete(
+      notificationId,
+      userId,
     );
 
-    if (!notificationDoc) {
+    if (!deleted) {
       throw new NotFoundException(
         'Notification not found or you do not have permission to access it',
       );
     }
-
-    await notificationDoc.ref.delete();
   }
 
   /**
    * Get unread notification count
    */
   async getUnreadCount(userId: string): Promise<number> {
-    const snapshot = await this.firebaseService.firestore
-      .collectionGroup('notifications')
-      .where('recipientId', '==', userId)
-      .where('read', '==', false)
-      .get();
-
-    return snapshot.size;
+    return this.notificationRepository.getUnreadCount(userId);
   }
 
   /**
@@ -315,21 +266,11 @@ export class NotificationService {
     enabled: boolean;
     tokenCount: number;
   }> {
-    const userDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(userId)
-      .get();
-
-    if (!userDoc.exists) {
-      return { enabled: false, tokenCount: 0 };
-    }
-
-    const userData = userDoc.data() as UserDataWithTokens | undefined;
-    const fcmTokens: FcmTokenData[] = userData?.fcmTokens ?? [];
+    const tokenCount = await this.fcmTokenRepository.countForUser(userId);
 
     return {
-      enabled: fcmTokens.length > 0,
-      tokenCount: fcmTokens.length,
+      enabled: tokenCount > 0,
+      tokenCount,
     };
   }
 
@@ -346,48 +287,22 @@ export class NotificationService {
       this.logger.log(`Registering FCM token for user: ${userId}`);
       this.logger.debug(`Platform: ${platform || 'unknown'}`);
 
-      const userRef = this.firebaseService.firestore
-        .collection('users')
-        .doc(userId);
-      const userDoc = await userRef.get();
-
-      if (!userDoc.exists) {
+      const user = await this.usersRepository.findById(userId);
+      if (!user) {
         this.logger.warn(`User not found: ${userId}`);
         throw new NotFoundException('User not found');
       }
 
-      // Get existing FCM tokens array
-      const userData = userDoc.data() as UserDataWithTokens | undefined;
-      const existingTokens: FcmTokenData[] = userData?.fcmTokens ?? [];
-      this.logger.debug(`Existing tokens count: ${existingTokens.length}`);
+      // ON CONFLICT (user_id, token) DO NOTHING — inserted=false means the
+      // token was already registered (replaces arrayUnion dedupe).
+      const inserted = await this.fcmTokenRepository.add({
+        userId,
+        token: fcmToken,
+        platform: platform || 'unknown',
+        deviceId,
+      });
 
-      // Check if token already exists
-      const tokenExists = existingTokens.some(
-        (t: FcmTokenData) => t.token === fcmToken,
-      );
-
-      if (!tokenExists) {
-        this.logger.log('Adding new FCM token');
-
-        // Add new token with metadata
-        // Note: Using ISO string instead of FieldValue.serverTimestamp()
-        // because Firestore doesn't allow serverTimestamp in array elements
-        const tokenData: FcmTokenData = {
-          token: fcmToken,
-          platform: platform || 'unknown',
-          deviceId: deviceId || null,
-          registeredAt: new Date().toISOString(),
-        };
-
-        // Use set with merge to handle cases where fcmTokens field doesn't exist
-        await userRef.set(
-          {
-            fcmTokens: FieldValue.arrayUnion(tokenData),
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true },
-        );
-
+      if (inserted) {
         this.logger.log(
           `FCM token registered successfully for user: ${userId}`,
         );
@@ -408,9 +323,9 @@ export class NotificationService {
         `FCM token registration error for user ${userId}: ${errorMessage}`,
         errorStack,
       );
-      throw new BadRequestException(
-        `Failed to register FCM token: ${errorMessage}`,
-      );
+      // Keep the detailed cause in the logs above; return a generic message so
+      // internal details (e.g. SQL errors) aren't exposed to the client.
+      throw new BadRequestException('Failed to register FCM token');
     }
   }
 
@@ -422,31 +337,12 @@ export class NotificationService {
     fcmToken: string,
   ): Promise<{ message: string }> {
     try {
-      const userRef = this.firebaseService.firestore
-        .collection('users')
-        .doc(userId);
-      const userDoc = await userRef.get();
-
-      if (!userDoc.exists) {
+      const user = await this.usersRepository.findById(userId);
+      if (!user) {
         throw new NotFoundException('User not found');
       }
 
-      const userData = userDoc.data() as UserDataWithTokens | undefined;
-      const existingTokens: FcmTokenData[] = userData?.fcmTokens ?? [];
-
-      // Filter out the token to remove
-      const updatedTokens = existingTokens.filter(
-        (t: FcmTokenData) => t.token !== fcmToken,
-      );
-
-      // Use set with merge to avoid issues
-      await userRef.set(
-        {
-          fcmTokens: updatedTokens,
-          updatedAt: FieldValue.serverTimestamp(),
-        },
-        { merge: true },
-      );
+      await this.fcmTokenRepository.remove(userId, fcmToken);
 
       return { message: 'FCM token removed successfully' };
     } catch (error) {
@@ -468,19 +364,6 @@ export class NotificationService {
    * Get all FCM tokens for a user (used by FcmService)
    */
   async getUserFcmTokens(userId: string): Promise<string[]> {
-    const userDoc = await this.firebaseService.firestore
-      .collection('users')
-      .doc(userId)
-      .get();
-
-    if (!userDoc.exists) {
-      return [];
-    }
-
-    const userData = userDoc.data() as UserDataWithTokens | undefined;
-    const fcmTokens: FcmTokenData[] = userData?.fcmTokens ?? [];
-
-    // Return just the token strings
-    return fcmTokens.map((t: FcmTokenData) => t.token);
+    return this.fcmTokenRepository.getTokens(userId);
   }
 }

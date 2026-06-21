@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { FirebaseService } from '../../../shared/firebase/firebase.service';
+import { FcmTokenRepository } from '../../../database/repositories/fcm-token.repository';
 import { MulticastMessage } from 'firebase-admin/messaging';
 
 export interface PushNotificationPayload {
@@ -13,7 +14,10 @@ export interface PushNotificationPayload {
 export class FcmService {
   private readonly logger = new Logger(FcmService.name);
 
-  constructor(private firebaseService: FirebaseService) {}
+  constructor(
+    private firebaseService: FirebaseService,
+    private fcmTokenRepository: FcmTokenRepository,
+  ) {}
 
   /**
    * Send push notification to specific user tokens
@@ -105,14 +109,30 @@ export class FcmService {
           ...message,
         });
 
-      // Track failed tokens for cleanup
+      // Track failed tokens for cleanup. Only tokens that FCM reports as
+      // permanently invalid are removed — transient failures (e.g. server
+      // errors, rate limits) must be preserved so the device isn't silently
+      // unsubscribed.
+      // Only codes that mean THIS token can never receive a message. Excludes
+      // config/payload errors (mismatched-credential, third-party-auth-error,
+      // payload-size-limit-exceeded) which affect the request, not the token,
+      // and would otherwise unsubscribe healthy devices.
+      const permanentFailureCodes = new Set([
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-argument',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-recipient',
+        'messaging/invalid-package-name',
+      ]);
       const failedTokens: string[] = [];
       response.responses.forEach((resp, idx) => {
         if (!resp.success) {
-          failedTokens.push(tokens[idx]);
           this.logger.warn(
             `Failed to send to token ${tokens[idx]}: ${resp.error?.message}`,
           );
+          if (resp.error && permanentFailureCodes.has(resp.error.code)) {
+            failedTokens.push(tokens[idx]);
+          }
         }
       });
 
@@ -133,50 +153,14 @@ export class FcmService {
   }
 
   /**
-   * Remove invalid/expired FCM tokens from all users
-   * Processes in batches of 10 to comply with Firestore's array-contains-any limit
+   * Remove invalid/expired FCM tokens across all users.
+   * One DELETE replaces the batched array-contains-any scan + per-user rewrite.
    */
   private async removeInvalidTokens(tokens: string[]): Promise<void> {
     try {
-      // Process in batches of 10 (Firestore array-contains-any limit)
-      for (let i = 0; i < tokens.length; i += 10) {
-        const batch = tokens.slice(i, i + 10);
-
-        this.logger.log(
-          `Processing token cleanup batch ${Math.floor(i / 10) + 1} (${batch.length} tokens)`,
-        );
-
-        // Query users with any of these tokens
-        const usersSnapshot = await this.firebaseService.firestore
-          .collection('users')
-          .where('fcmTokens', 'array-contains-any', batch)
-          .get();
-
-        const updatePromises = usersSnapshot.docs.map(async (doc) => {
-          const userData = doc.data();
-          const fcmTokens = (userData.fcmTokens || []) as Array<{
-            token: string;
-          }>;
-
-          // Filter out all invalid tokens (not just from current batch)
-          const validTokens = fcmTokens.filter(
-            (tokenData) => !tokens.includes(tokenData.token),
-          );
-
-          if (validTokens.length !== fcmTokens.length) {
-            await doc.ref.update({ fcmTokens: validTokens });
-            const removedCount = fcmTokens.length - validTokens.length;
-            this.logger.log(
-              `Removed ${removedCount} invalid token(s) from user ${doc.id}`,
-            );
-          }
-        });
-
-        await Promise.all(updatePromises);
-      }
-
+      await this.fcmTokenRepository.removeTokens(tokens);
       this.logger.log(
-        `Token cleanup complete: processed ${tokens.length} invalid tokens`,
+        `Token cleanup complete: removed ${tokens.length} invalid token(s)`,
       );
     } catch (error) {
       this.logger.error('Error removing invalid tokens:', error);
