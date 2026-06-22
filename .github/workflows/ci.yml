@@ -246,6 +246,15 @@ jobs:
               sleep 10
             done
 
+            # Reload Caddy so the reverse proxy drops stale keepalive
+            # connections to the previous api-dev container and re-resolves
+            # the freshly recreated one (avoids a transient 502 window).
+            if docker inspect caddy >/dev/null 2>&1; then
+              docker exec caddy caddy reload --config /etc/caddy/Caddyfile
+            else
+              echo "caddy container not found, skipping reload"
+            fi
+
             # Cleanup dangling images
             docker image prune -f
 
@@ -253,10 +262,19 @@ jobs:
           EOF
 
       - name: Verify deployment
+        # Retry the public health check: right after container recreation the
+        # proxy may briefly serve a stale upstream, so a single curl is flaky.
         run: |
-          sleep 15
-          curl -sf https://api.dev.tulink.xyz/health || exit 1
-          echo "Deployment verification successful!"
+          for i in {1..12}; do
+            if curl -sf --connect-timeout 5 --max-time 10 https://api.dev.tulink.xyz/health; then
+              echo "Deployment verification successful!"
+              exit 0
+            fi
+            echo "Attempt $i/12 failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "Health check never passed after 120s"
+          exit 1
 
       - name: Notify deployment status
         if: always()
