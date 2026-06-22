@@ -108,9 +108,15 @@ export class PriorityService {
       case 'HIGH':
         return false; // Never throttle HIGH priority
       case 'MEDIUM':
-        return timeSinceLastUpdate < 3000; // 3 seconds
+        return (
+          timeSinceLastUpdate <
+          this.configService.get<number>('app.liveThrottleMediumMs', 0)
+        );
       case 'LOW':
-        return timeSinceLastUpdate < 10000; // 10 seconds
+        return (
+          timeSinceLastUpdate <
+          this.configService.get<number>('app.liveThrottleLowMs', 2000)
+        );
     }
   }
 
