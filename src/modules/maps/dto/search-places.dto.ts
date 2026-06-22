@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, MinLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  MinLength,
+  Length,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
 export class SearchPlacesDto {
@@ -18,4 +24,12 @@ export class SearchPlacesDto {
   @Type(() => Number)
   @IsNumber({}, { message: 'Longitude must be a valid number' })
   lng?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(2, 2, { message: 'regionCode must be a 2-letter ISO 3166-1 code' })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  regionCode?: string;
 }

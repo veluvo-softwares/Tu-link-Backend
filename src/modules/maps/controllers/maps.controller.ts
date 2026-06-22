@@ -51,6 +51,7 @@ export class MapsController {
       searchDto.query,
       searchDto.lat,
       searchDto.lng,
+      searchDto.regionCode,
     );
     return { results };
   }
