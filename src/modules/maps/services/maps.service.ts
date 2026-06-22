@@ -60,10 +60,15 @@ export class MapsService {
   ): Promise<PlaceResult[]> {
     // Resolve region defensively: prefer a valid client value, else fall back
     // to the config default. A bad/empty regionCode must never break search.
-    const fallbackRegion = this.configService.get<string>(
+    const configuredFallback = this.configService.get<string>(
       'maps.defaultRegionCode',
       'KE',
     );
+    // The config default comes from unvalidated env, so validate it too and
+    // fall back to a hardcoded valid region if it is malformed.
+    const fallbackRegion = /^[A-Z]{2}$/.test(configuredFallback)
+      ? configuredFallback
+      : 'KE';
     const region =
       regionCode && /^[A-Z]{2}$/.test(regionCode) ? regionCode : fallbackRegion;
 
