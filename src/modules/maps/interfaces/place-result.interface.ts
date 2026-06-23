@@ -25,22 +25,6 @@ export class SearchPlacesResponse {
   results: PlaceResult[];
 }
 
-export class ReverseGeocodeResult {
-  @ApiProperty({
-    description: 'Short name or primary identifier of the location',
-  })
-  displayName: string;
-
-  @ApiProperty({ description: 'Full formatted address' })
-  address: string;
-
-  @ApiProperty({ description: 'Latitude coordinate' })
-  lat: number;
-
-  @ApiProperty({ description: 'Longitude coordinate' })
-  lng: number;
-}
-
 export class RouteStep {
   instruction: string;
   distanceMetres: number;
