@@ -1,23 +1,13 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadGatewayException,
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import {
-  Client,
-  LatLng,
-  AddressType,
-} from '@googlemaps/google-maps-services-js';
+import { Client } from '@googlemaps/google-maps-services-js';
 import { RedisService } from '../../../shared/redis/redis.service';
-import { DistanceUtils } from '../../../common/utils/distance.utils';
-import {
-  PlaceResult,
-  ReverseGeocodeResult,
-  RouteResult,
-} from '../interfaces/place-result.interface';
-
-interface RouteInfo {
-  polyline: string;
-  distance: number;
-  duration: number;
-}
+import { PlaceResult, RouteResult } from '../interfaces/place-result.interface';
 
 // Google Places API (New) response types - internal use only
 interface GoogleNewPlacesResponse {
@@ -123,6 +113,13 @@ export class MapsService {
       };
     }
 
+    const timeoutMs = this.configService.get<number>(
+      'maps.requestTimeoutMs',
+      8000,
+    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
       // Call Google Places API (New) - POST request (Watchout 4)
       const response = await fetch(
@@ -136,6 +133,7 @@ export class MapsService {
               'places.id,places.displayName,places.formattedAddress,places.location,places.types',
           },
           body: JSON.stringify(requestBody),
+          signal: controller.signal,
         },
       );
 
@@ -144,7 +142,10 @@ export class MapsService {
         this.logger.error(
           `Google Places API error: ${response.status} - ${errorBody}`,
         );
-        throw new Error(`Google Places API returned ${response.status}`);
+        throw new BadGatewayException(
+          'Google Places API request failed',
+          'UPSTREAM_PLACES_ERROR',
+        );
       }
 
       const data = (await response.json()) as GoogleNewPlacesResponse;
@@ -165,118 +166,17 @@ export class MapsService {
 
       return results;
     } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
       this.logger.error('Error searching places:', error);
-      throw new Error('Failed to search places');
+      throw new ServiceUnavailableException(
+        'Google Places API is unreachable',
+        'UPSTREAM_UNAVAILABLE',
+      );
+    } finally {
+      clearTimeout(timeout);
     }
-  }
-
-  /**
-   * Geocode an address to coordinates
-   */
-  async geocodeAddress(address: string): Promise<LatLng | null> {
-    try {
-      const response = await this.client.geocode({
-        params: {
-          address,
-          key: this.apiKey,
-        },
-      });
-
-      if (response.data.results.length > 0) {
-        return response.data.results[0].geometry.location;
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Geocoding error:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Reverse geocode coordinates to address
-   */
-  async reverseGeocode(
-    lat: number,
-    lng: number,
-  ): Promise<ReverseGeocodeResult> {
-    // Build cache key with 4dp precision for reverse geocoding (Watchout 3)
-    const cacheKey = `maps:reverse:${lat.toFixed(4)}:${lng.toFixed(4)}`;
-
-    // Check Redis cache first
-    const redisClient = this.redisService.getClient();
-    const cachedResult = await redisClient.get(cacheKey);
-
-    if (cachedResult) {
-      this.logger.debug(`[Maps] Cache hit: ${cacheKey}`);
-      return JSON.parse(cachedResult) as ReverseGeocodeResult;
-    }
-
-    this.logger.debug(`[Maps] Cache miss — calling Google: ${cacheKey}`);
-
-    try {
-      const response = await this.client.reverseGeocode({
-        params: {
-          latlng: { lat, lng },
-          key: this.apiKey,
-          result_type: [
-            AddressType.establishment,
-            AddressType.point_of_interest,
-            AddressType.route,
-            AddressType.locality,
-          ],
-        },
-      });
-
-      let result: ReverseGeocodeResult;
-
-      if (response.data.results.length > 0) {
-        const firstResult = response.data.results[0];
-        const displayName =
-          firstResult.address_components[0]?.long_name || 'Unknown location';
-
-        result = {
-          displayName,
-          address: firstResult.formatted_address,
-          lat,
-          lng,
-        };
-      } else {
-        result = {
-          displayName: 'Unknown location',
-          address: '',
-          lat,
-          lng,
-        };
-      }
-
-      // Cache result with 1 day TTL
-      const ttlSeconds = 60 * 60 * 24; // 1 day
-      await redisClient.setex(cacheKey, ttlSeconds, JSON.stringify(result));
-
-      return result;
-    } catch (error) {
-      this.logger.error('Reverse geocoding error:', error);
-
-      // Return fallback result on error
-      return {
-        displayName: 'Unknown location',
-        address: '',
-        lat,
-        lng,
-      };
-    }
-  }
-
-  /**
-   * Calculate distance between two points using Haversine formula
-   * (local calculation, no API call)
-   */
-  calculateDistance(
-    from: { latitude: number; longitude: number },
-    to: { latitude: number; longitude: number },
-  ): number {
-    return DistanceUtils.haversineDistance(from, to);
   }
 
   /**
@@ -309,38 +209,6 @@ export class MapsService {
       return null;
     } catch (error) {
       console.error('Distance Matrix error:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Get route directions between two points
-   */
-  async getDirections(
-    from: { latitude: number; longitude: number },
-    to: { latitude: number; longitude: number },
-  ): Promise<RouteInfo | null> {
-    try {
-      const response = await this.client.directions({
-        params: {
-          origin: `${from.latitude},${from.longitude}`,
-          destination: `${to.latitude},${to.longitude}`,
-          key: this.apiKey,
-        },
-      });
-
-      if (response.data.routes.length > 0) {
-        const route = response.data.routes[0];
-        return {
-          polyline: route.overview_polyline.points,
-          distance: route.legs[0].distance.value,
-          duration: route.legs[0].duration.value,
-        };
-      }
-
-      return null;
-    } catch (error) {
-      console.error('Directions error:', error);
       return null;
     }
   }
@@ -392,15 +260,25 @@ export class MapsService {
       `?geometries=geojson&overview=full&steps=true` +
       `&access_token=${token}`;
 
+    const timeoutMs = this.configService.get<number>(
+      'maps.requestTimeoutMs',
+      8000,
+    );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
 
       if (!response.ok) {
         const body = await response.text();
         this.logger.error(
           `Mapbox Directions API error: ${response.status} — ${body}`,
         );
-        return null; // Do not cache errors
+        throw new BadGatewayException(
+          'Mapbox Directions API request failed',
+          'UPSTREAM_DIRECTIONS_ERROR',
+        );
       }
 
       const data = (await response.json()) as {
@@ -445,8 +323,16 @@ export class MapsService {
 
       return result;
     } catch (error) {
+      if (error instanceof BadGatewayException) {
+        throw error;
+      }
       this.logger.error('Error calling Mapbox Directions API:', error);
-      return null;
+      throw new ServiceUnavailableException(
+        'Mapbox Directions API is unreachable',
+        'UPSTREAM_UNAVAILABLE',
+      );
+    } finally {
+      clearTimeout(timeout);
     }
   }
 }
