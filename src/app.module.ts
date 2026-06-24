@@ -11,6 +11,7 @@ import firebaseConfig from './config/firebase.config';
 import redisConfig from './config/redis.config';
 import mapsConfig from './config/maps.config';
 import databaseConfig from './config/database.config';
+import authConfig from './config/auth.config';
 
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
@@ -37,6 +38,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
         redisConfig,
         mapsConfig,
         databaseConfig,
+        authConfig,
       ],
     }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
