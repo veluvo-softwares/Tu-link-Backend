@@ -2,12 +2,16 @@ import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { CachedLocation } from '../interfaces/location.interface';
+import { LoggerService } from '../logger/logger.service';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private client: Redis;
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private logger: LoggerService,
+  ) {}
 
   onModuleInit() {
     this.client = new Redis({
@@ -154,6 +158,48 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const key = `journey:${journeyId}:location:${participantId}`;
     const result = await this.client.get(key);
     return result ? (JSON.parse(result) as CachedLocation) : null;
+  }
+
+  // Revocation cache
+  async getCachedRevocation(uid: string): Promise<string | null> {
+    try {
+      const key = `auth:revocation:${uid}`;
+      return await this.client.get(key);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read revocation cache for uid ${uid}: ${(error as Error).message}`,
+        'RedisService',
+      );
+      return null;
+    }
+  }
+
+  async setCachedRevocation(
+    uid: string,
+    tokensValidAfterTime: string,
+    ttlSeconds: number,
+  ): Promise<void> {
+    try {
+      const key = `auth:revocation:${uid}`;
+      await this.client.setex(key, ttlSeconds, tokensValidAfterTime);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to write revocation cache for uid ${uid}: ${(error as Error).message}`,
+        'RedisService',
+      );
+    }
+  }
+
+  async invalidateRevocationCache(uid: string): Promise<void> {
+    try {
+      const key = `auth:revocation:${uid}`;
+      await this.client.del(key);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate revocation cache for uid ${uid}: ${(error as Error).message}`,
+        'RedisService',
+      );
+    }
   }
 
   // WebSocket room management
