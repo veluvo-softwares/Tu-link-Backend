@@ -118,9 +118,16 @@ export class JourneyRepository {
     return row ? this.toRecord(row) : null;
   }
 
-  // tx-aware read of the leader's current ACTIVE journey — meant to be called
-  // with the same `tx` handle the caller's db.transaction() uses for the
-  // subsequent status-flip write, so both see a consistent snapshot.
+  // tx-aware read of the leader's current ACTIVE journey. This is a plain
+  // SELECT under the default READ COMMITTED isolation -- it does NOT lock
+  // the row and does NOT by itself prevent two concurrent transactions from
+  // both observing "no active journey" and proceeding to the write. It is
+  // only a fast-path / friendly-UX pre-check so the common case returns a
+  // clean 409 without round-tripping through a unique-violation. The actual
+  // race-safety guarantee comes from the partial unique index
+  // (idx_journeys_one_active_per_leader) plus the caller's 23505 catch,
+  // which is what serializes concurrent winners/losers. Do not remove the
+  // 23505 handling on the assumption that this pre-check is sufficient.
   async findActiveByLeader(
     tx: NodePgDatabase<typeof schema>,
     leaderId: string,
