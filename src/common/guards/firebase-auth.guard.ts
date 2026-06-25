@@ -68,10 +68,10 @@ export class FirebaseAuthGuard implements CanActivate {
       const firebaseError = error as { errorInfo?: { code?: string } };
       const code: string = firebaseError.errorInfo?.code ?? '';
       if (code === 'auth/id-token-expired') {
-        throw new UnauthorizedException({
-          message: 'Token expired, please refresh',
-          code: 'TOKEN_EXPIRED',
-        });
+        throw new UnauthorizedException(
+          'Token expired, please refresh',
+          'TOKEN_EXPIRED',
+        );
       }
       this.logger.error(
         'FirebaseAuthGuard token verification failed:',
@@ -79,10 +79,7 @@ export class FirebaseAuthGuard implements CanActivate {
         'FirebaseAuthGuard',
         { code: code || String(error) },
       );
-      throw new UnauthorizedException({
-        message: 'Please login again',
-        code: 'AUTH_FAILED',
-      });
+      throw new UnauthorizedException('Please login again', 'AUTH_FAILED');
     }
 
     const isGuest = decodedToken.firebase?.sign_in_provider === 'anonymous';
@@ -140,10 +137,7 @@ export class FirebaseAuthGuard implements CanActivate {
                 String(error),
             },
           );
-          throw new UnauthorizedException({
-            message: 'Please login again',
-            code: 'AUTH_FAILED',
-          });
+          throw new UnauthorizedException('Please login again', 'AUTH_FAILED');
         }
       }
 
@@ -152,10 +146,10 @@ export class FirebaseAuthGuard implements CanActivate {
         const tokensValidAfter = new Date(tokensValidAfterTime);
 
         if (tokenIssuedAt < tokensValidAfter) {
-          throw new UnauthorizedException({
-            message: 'Please login again',
-            code: 'TOKEN_REVOKED',
-          });
+          throw new UnauthorizedException(
+            'Please login again',
+            'TOKEN_REVOKED',
+          );
         }
       }
     }
