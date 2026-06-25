@@ -280,6 +280,24 @@ describe('FirebaseAuthGuard (e2e)', () => {
     expect(firebaseServiceStub.auth.getUser.mock.calls.length).toBe(1);
   });
 
+  it('AUTH-04 (never-revoked): 3 sequential requests for an uncached, never-revoked uid trigger getUser() at most once within the cache TTL window', async () => {
+    const uid = 'auth04-never-revoked';
+    const iat = nowSeconds() - 100;
+    firebaseServiceStub.auth.verifyIdToken.mockResolvedValue(
+      decodedToken(uid, iat),
+    );
+    firebaseServiceStub.auth.getUser.mockResolvedValue({});
+
+    for (let i = 0; i < 3; i++) {
+      const res = await request(app.getHttpServer())
+        .get('/auth/searchUser?query=ab')
+        .set('Authorization', 'Bearer faketoken');
+      expect(res.status).toBe(200);
+    }
+
+    expect(firebaseServiceStub.auth.getUser.mock.calls.length).toBe(1);
+  });
+
   // --- AUTH-05: cache invalidation forces a live re-check --------------------
 
   it('AUTH-05: invalidateRevocationCache forces the next request to call getUser() again instead of reading a stale cache entry', async () => {
