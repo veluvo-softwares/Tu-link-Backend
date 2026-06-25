@@ -15,6 +15,7 @@ import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { UsersRepository } from '../../database/repositories/users.repository';
 import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { LoggerService } from '../../shared/logger/logger.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -43,6 +44,7 @@ export class AuthService {
     private emailService: TuLinkResendEmailService,
     private redisService: RedisService,
     private eventEmitter: EventEmitter2,
+    private logger: LoggerService,
   ) {
     this.firebaseApiKey =
       this.configService.get<string>('firebase.apiKey') || '';
@@ -391,7 +393,13 @@ export class AuthService {
         // Force-disconnect any live /location sockets for this uid. Harmless
         // no-op if the guest has no live sockets. Fire-and-forget: logout
         // success must not depend on socket teardown completing.
-        this.eventEmitter.emit('auth.logout', { uid });
+        const handled = this.eventEmitter.emit('auth.logout', { uid });
+        if (!handled) {
+          this.logger.warn(
+            `auth.logout emitted but no listener handled it (uid=${uid})`,
+            'AuthService',
+          );
+        }
         return { message: 'Successfully logged out' };
       }
 
@@ -403,7 +411,13 @@ export class AuthService {
       // the user:{uid} room (never a broadcast). Emitted after the
       // security-critical revoke + cache-invalidate calls above. Fire-and-
       // forget: logout success must not depend on socket teardown completing.
-      this.eventEmitter.emit('auth.logout', { uid });
+      const handled = this.eventEmitter.emit('auth.logout', { uid });
+      if (!handled) {
+        this.logger.warn(
+          `auth.logout emitted but no listener handled it (uid=${uid})`,
+          'AuthService',
+        );
+      }
 
       // No-op if the row doesn't exist (matches the prior exists-check).
       await this.usersRepository.setLastLogout(uid);
