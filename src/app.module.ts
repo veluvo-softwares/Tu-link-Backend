@@ -18,6 +18,7 @@ import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
 import { DatabaseModule } from './database/database.module';
 import { LoggerModule } from './shared/logger/logger.module';
+import { AuthMetricsModule } from './modules/auth/services/auth-metrics.module';
 
 // Feature modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -47,6 +48,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     FirebaseModule,
     RedisModule,
     DatabaseModule,
+    AuthMetricsModule,
     // Feature modules
     AuthModule,
     JourneyModule,
