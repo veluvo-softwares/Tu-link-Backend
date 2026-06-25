@@ -273,6 +273,36 @@ export class WebSocketMetricsService {
   }
 
   /**
+   * Record a force_disconnect event: sockets force-disconnected for a uid as
+   * a result of the user logging out. Always emits a structured info log;
+   * the Redis counter increment is best-effort and never causes this method
+   * to throw (mirrors AuthMetricsService.recordTransientBypass).
+   */
+  async recordForceDisconnect(uid: string, socketCount: number): Promise<void> {
+    this.logger.info(
+      'WebSocket force-disconnected on logout',
+      'WebSocketMetricsService',
+      {
+        event: 'force_disconnect',
+        uid,
+        socketCount,
+        timestamp: new Date().toISOString(),
+      },
+    );
+
+    try {
+      await this.redisService
+        .getClient()
+        .incrby('websocket:metrics:force_disconnect:total', socketCount);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to increment force_disconnect counter: ${(error as Error).message}`,
+        'WebSocketMetricsService',
+      );
+    }
+  }
+
+  /**
    * Check performance thresholds and log warnings
    */
   private checkPerformanceThresholds(
