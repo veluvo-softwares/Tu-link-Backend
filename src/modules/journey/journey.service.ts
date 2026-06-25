@@ -19,6 +19,7 @@ import { LocationGateway } from '../location/location.gateway';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
+import { LoggerService } from '../../shared/logger/logger.service';
 
 @Injectable()
 export class JourneyService {
@@ -33,6 +34,7 @@ export class JourneyService {
     private analyticsService: AnalyticsService,
     @Inject(forwardRef(() => LocationGateway))
     private locationGateway: LocationGateway,
+    private logger: LoggerService,
   ) {}
 
   async create(
@@ -189,52 +191,89 @@ export class JourneyService {
           this.databaseService.db,
           journey.leaderId,
         );
+        if (!conflicting) {
+          // The competing transaction's ACTIVE journey resolved (e.g. ended)
+          // in the window between our 23505 and this re-query. We still lost
+          // the race for this journeyId (the unique-violation proves another
+          // write won), but there is no longer a real activeJourneyId to
+          // report -- omitting it would silently degrade the {code,
+          // activeJourneyId} contract. Log the anomaly and surface a 409
+          // without a stale/undefined id so the client can safely retry.
+          this.logger.warn(
+            `23505 on journey ${journeyId} but no ACTIVE journey found on re-query for leader ${journey.leaderId}`,
+            'JourneyService',
+          );
+          throw new ConflictException({
+            message:
+              'You already have an active journey, please retry starting this journey',
+            error: 'ALREADY_IN_ACTIVE_JOURNEY',
+          });
+        }
         throw new ConflictException({
           message: 'You already have an active journey',
           error: 'ALREADY_IN_ACTIVE_JOURNEY',
-          activeJourneyId: conflicting?.id,
+          activeJourneyId: conflicting.id,
         });
       }
       throw error;
     }
 
-    // Capture who is being activated BEFORE the bulk update (the filter below
-    // keys off the pre-activation ACCEPTED/LEADER state for Redis + notifications).
-    const participants =
-      await this.participantService.getJourneyParticipants(journeyId);
+    // The journey is now durably ACTIVE in Postgres. Everything below is a
+    // post-commit side effect (participant activation, Redis registration,
+    // notifications, WS broadcast) -- it must never leak a raw 500 back to
+    // the caller nor silently swallow the resulting drift, since the DB
+    // write has already succeeded. Failures here are logged best-effort and
+    // the now-ACTIVE journey is still returned.
+    try {
+      // Capture who is being activated BEFORE the bulk update (the filter
+      // below keys off the pre-activation ACCEPTED/LEADER state for Redis +
+      // notifications).
+      const participants =
+        await this.participantService.getJourneyParticipants(journeyId);
 
-    // Promote all accepted participants (and the leader) to ACTIVE in one query
-    await this.participantService.activateForStart(journeyId);
+      // Promote all accepted participants (and the leader) to ACTIVE in one query
+      await this.participantService.activateForStart(journeyId);
 
-    // Add to active journeys in Redis
-    await this.redisService.addActiveJourney(journeyId);
+      // Add to active journeys in Redis
+      await this.redisService.addActiveJourney(journeyId);
 
-    // Cache participants in Redis
-    const activeParticipants = participants.filter(
-      (p) => p.status === 'ACCEPTED' || p.role === 'LEADER',
-    );
-    for (const participant of activeParticipants) {
-      await this.redisService.addJourneyParticipant(
+      // Cache participants in Redis
+      const activeParticipants = participants.filter(
+        (p) => p.status === 'ACCEPTED' || p.role === 'LEADER',
+      );
+      for (const participant of activeParticipants) {
+        await this.redisService.addJourneyParticipant(
+          journeyId,
+          participant.userId,
+        );
+      }
+
+      // Send journey started notifications to all active participants
+      const participantIds = activeParticipants.map((p) => p.userId);
+      await this.notificationService.sendJourneyStarted(
         journeyId,
-        participant.userId,
+        journey.name,
+        participantIds,
+      );
+
+      // Broadcast to all members in the WebSocket room so members on the home
+      // screen can navigate to the map without waiting for an FCM notification.
+      await this.locationGateway.broadcastJourneyStarted(journeyId, {
+        journeyId,
+        journeyName: journey.name,
+        status: 'ACTIVE',
+      });
+    } catch (err) {
+      // The journey row is already committed ACTIVE -- log loudly so the
+      // Redis/notification drift is observable, but do not fail the request:
+      // the start itself succeeded.
+      this.logger.error(
+        `Post-start side effects failed for journey ${journeyId}`,
+        err instanceof Error ? err.stack : undefined,
+        'JourneyService',
+        { journeyId, leaderId: journey.leaderId },
       );
     }
-
-    // Send journey started notifications to all active participants
-    const participantIds = activeParticipants.map((p) => p.userId);
-    await this.notificationService.sendJourneyStarted(
-      journeyId,
-      journey.name,
-      participantIds,
-    );
-
-    // Broadcast to all members in the WebSocket room so members on the home
-    // screen can navigate to the map without waiting for an FCM notification.
-    await this.locationGateway.broadcastJourneyStarted(journeyId, {
-      journeyId,
-      journeyName: journey.name,
-      status: 'ACTIVE',
-    });
 
     return this.findById(journeyId);
   }
