@@ -30,6 +30,11 @@ const TRANSIENT_REVOCATION_CHECK_CODES = new Set<string>([
   'auth/internal-error',
 ]);
 
+// Reserved cache value meaning "checked, no revocation timestamp to compare."
+// Not a valid ISO-8601 date string (no real tokensValidAfterTime can ever
+// equal this), so it can never collide with a real Firebase timestamp.
+const NO_REVOCATION_SENTINEL = 'NO_REVOCATION';
+
 function isTransientRevocationError(error: unknown): boolean {
   const code =
     (error as { errorInfo?: { code?: string }; code?: string }).errorInfo
@@ -91,22 +96,29 @@ export class FirebaseAuthGuard implements CanActivate {
       let tokensValidAfterTime: string | null =
         await this.redisService.getCachedRevocation(uid);
 
-      if (tokensValidAfterTime === null) {
+      if (tokensValidAfterTime === NO_REVOCATION_SENTINEL) {
+        // Cache hit on "checked, no revocation" — skip getUser() and skip
+        // the iat comparison entirely. Terminal early return.
+        request.user = {
+          uid: decodedToken.uid,
+          email: decodedToken.email,
+          emailVerified: decodedToken.email_verified,
+          isGuest,
+        };
+        return true;
+      } else if (tokensValidAfterTime === null) {
         try {
           const userRecord = await this.firebaseService.auth.getUser(uid);
           tokensValidAfterTime = userRecord.tokensValidAfterTime ?? null;
 
-          if (tokensValidAfterTime) {
-            const ttl =
-              this.configService.get<number>(
-                'auth.revocationCacheTtlSeconds',
-              ) ?? 60;
-            await this.redisService.setCachedRevocation(
-              uid,
-              tokensValidAfterTime,
-              ttl,
-            );
-          }
+          const ttl =
+            this.configService.get<number>('auth.revocationCacheTtlSeconds') ??
+            60;
+          await this.redisService.setCachedRevocation(
+            uid,
+            tokensValidAfterTime ?? NO_REVOCATION_SENTINEL,
+            ttl,
+          );
         } catch (error) {
           if (isTransientRevocationError(error)) {
             const code =
