@@ -14,6 +14,7 @@ import {
 import { UseFilters, Inject, forwardRef } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { LoggerService } from '../../shared/logger/logger.service';
@@ -152,6 +153,36 @@ export class LocationGateway
 
     // Clean up Redis mapping
     await this.redisService.deleteSocketUser(client.id);
+  }
+
+  /**
+   * Force-disconnect a logged-out user's live /location sockets, scoped to
+   * the user:{uid} room only (never a broadcast). Triggered by AuthService
+   * via the event bus (no direct dependency between the two modules --
+   * SOCK-04). Peer notification is automatic: the existing handleDisconnect
+   * above already emits participant-disconnected when each socket's
+   * transport closes, so no additional emit is added here.
+   *
+   * This listener must never throw -- EventEmitter2.emit() invokes listeners
+   * synchronously in-process, and an uncaught throw here would propagate
+   * into AuthService.logout()'s call stack, which must never fail logout.
+   */
+  @OnEvent('auth.logout')
+  async handleAuthLogout(payload: { uid: string }): Promise<void> {
+    try {
+      const room = `user:${payload.uid}`;
+      const sockets = await this.server.in(room).fetchSockets();
+      this.server.in(room).disconnectSockets(true);
+      await this.webSocketMetricsService.recordForceDisconnect(
+        payload.uid,
+        sockets.length,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to force-disconnect sockets for user ${payload.uid}: ${(error as Error).message}`,
+        'LocationGateway',
+      );
+    }
   }
 
   /**
