@@ -10,6 +10,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { UsersRepository } from '../../database/repositories/users.repository';
 import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
@@ -41,6 +42,7 @@ export class AuthService {
     private configService: ConfigService,
     private emailService: TuLinkResendEmailService,
     private redisService: RedisService,
+    private eventEmitter: EventEmitter2,
   ) {
     this.firebaseApiKey =
       this.configService.get<string>('firebase.apiKey') || '';
@@ -386,12 +388,22 @@ export class AuthService {
       if (isGuest) {
         // Delete the anonymous account entirely — nothing to preserve
         await this.firebaseService.auth.deleteUser(uid);
+        // Force-disconnect any live /location sockets for this uid. Harmless
+        // no-op if the guest has no live sockets. Fire-and-forget: logout
+        // success must not depend on socket teardown completing.
+        this.eventEmitter.emit('auth.logout', { uid });
         return { message: 'Successfully logged out' };
       }
 
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
       await this.redisService.invalidateRevocationCache(uid);
+
+      // Force-disconnect any live /location sockets for this uid, scoped to
+      // the user:{uid} room (never a broadcast). Emitted after the
+      // security-critical revoke + cache-invalidate calls above. Fire-and-
+      // forget: logout success must not depend on socket teardown completing.
+      this.eventEmitter.emit('auth.logout', { uid });
 
       // No-op if the row doesn't exist (matches the prior exists-check).
       await this.usersRepository.setLastLogout(uid);
