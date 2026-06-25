@@ -179,6 +179,9 @@ export class LocationGateway
 
     try {
       const room = `user:${payload.uid}`;
+      // socket.io's disconnectSockets() returns void -- there is no count of
+      // sockets actually torn down. The fetchSockets() result is the set of
+      // sockets targeted for disconnect, not a post-disconnect confirmation.
       const sockets = await this.server.in(room).fetchSockets();
       this.server.in(room).disconnectSockets(true);
       await this.webSocketMetricsService.recordForceDisconnect(
