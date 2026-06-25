@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { sql } from 'drizzle-orm';
 import { AppModule } from './../src/app.module';
 import { FirebaseAuthGuard } from './../src/common/guards/firebase-auth.guard';
 import { FirebaseService } from './../src/shared/firebase/firebase.service';
@@ -28,6 +29,7 @@ import { DatabaseService } from './../src/database/database.service';
 
 interface MockAuthRequest {
   user?: { uid: string; isGuest: boolean };
+  headers: Record<string, string | string[] | undefined>;
 }
 
 interface ErrorBody {
@@ -48,15 +50,25 @@ const firebaseServiceStub = {
   getMessaging: () => ({}),
 };
 
+// Test-only header the mock auth guard below reads to determine the acting
+// uid for each request. Using an explicit per-request header (rather than a
+// shared module-level mutable variable) removes any cross-request identity
+// hazard when multiple requests are in flight concurrently (WR-04) -- each
+// request carries its own identity independent of request ordering.
+const TEST_UID_HEADER = 'x-test-uid';
+
 describe('Journey start (e2e) -- JRNY-01..04', () => {
   let app: INestApplication<App>;
   let usersRepository: UsersRepository;
   let journeyRepository: JourneyRepository;
   let databaseService: DatabaseService;
 
-  // The guard override reads this mutable variable on every request, letting
-  // each test act as a different leader uid without rebuilding the module.
-  let currentUid = 'unset';
+  // Suffix every seeded uid with a per-run token so reruns never collide
+  // with rows left behind by a previous run (WR-03). A stray leftover ACTIVE
+  // journey from a prior run colliding with a fixed uid was previously able
+  // to poison JRNY-02's "no active journey -> succeeds" assertion.
+  const runToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const uidFor = (label: string): string => `${label}-${runToken}`;
 
   const createdUserIds: string[] = [];
 
@@ -68,7 +80,9 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
       .useValue({
         canActivate: (context: ExecutionContext) => {
           const req = context.switchToHttp().getRequest<MockAuthRequest>();
-          req.user = { uid: currentUid, isGuest: false };
+          const headerUid = req.headers[TEST_UID_HEADER];
+          const uid = Array.isArray(headerUid) ? headerUid[0] : headerUid;
+          req.user = { uid: uid ?? 'unset', isGuest: false };
           return true;
         },
       })
@@ -100,27 +114,35 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
   });
 
   afterAll(async () => {
-    // Best-effort cleanup so reruns don't accumulate rows. Each test uses a
-    // unique uid per run-scoped suffix would be ideal, but since uids here
-    // are fixed per test case, delete by leader_id (cascades to no FKs from
-    // journeys) then the seeded user row itself.
+    // Best-effort cleanup so reruns don't accumulate rows. uids are unique
+    // per run (runToken suffix), but still delete unconditionally for every
+    // uid this run seeded -- regardless of whether seedLeader actually
+    // inserted the row this run -- rather than relying on createdUserIds
+    // tracking alone, so a partially-seeded run never leaves an ACTIVE
+    // journey behind to poison a future run. Parameterized via sql to avoid
+    // the raw string-interpolation pattern.
     for (const uid of createdUserIds) {
       try {
         await databaseService.db.execute(
-          `DELETE FROM journeys WHERE leader_id = '${uid}'`,
+          sql`DELETE FROM journeys WHERE leader_id = ${uid}`,
         );
         await databaseService.db.execute(
-          `DELETE FROM users WHERE id = '${uid}'`,
+          sql`DELETE FROM users WHERE id = ${uid}`,
         );
       } catch {
         // Non-fatal -- harmless to leave test rows in the local dev DB if
-        // cleanup fails; unique per-suite-run uids avoid cross-run collisions.
+        // cleanup fails; unique per-run uids avoid cross-run collisions.
       }
     }
     await app.close();
   });
 
   async function seedLeader(uid: string): Promise<void> {
+    // Track every uid this run intends to use BEFORE checking existence, so
+    // afterAll always attempts cleanup for it even if seeding is skipped
+    // (e.g. a retried test run hitting an already-existing row) or fails
+    // partway through.
+    createdUserIds.push(uid);
     const existing = await usersRepository.findById(uid);
     if (!existing) {
       await usersRepository.create({
@@ -128,14 +150,13 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
         email: `${uid}@example.com`,
         displayName: uid,
       });
-      createdUserIds.push(uid);
     }
   }
 
   async function createJourney(uid: string, name: string): Promise<string> {
-    currentUid = uid;
     const res = await request(app.getHttpServer())
       .post('/journeys')
+      .set(TEST_UID_HEADER, uid)
       .send({ name });
     expect(res.status).toBe(201);
     return (res.body as SuccessBody<JourneyData>).data.id;
@@ -145,30 +166,33 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
     uid: string,
     journeyId: string,
   ): Promise<request.Response> {
-    currentUid = uid;
-    return request(app.getHttpServer()).post(`/journeys/${journeyId}/start`);
+    return request(app.getHttpServer())
+      .post(`/journeys/${journeyId}/start`)
+      .set(TEST_UID_HEADER, uid);
   }
 
   async function endJourney(
     uid: string,
     journeyId: string,
   ): Promise<request.Response> {
-    currentUid = uid;
-    return request(app.getHttpServer()).post(`/journeys/${journeyId}/end`);
+    return request(app.getHttpServer())
+      .post(`/journeys/${journeyId}/end`)
+      .set(TEST_UID_HEADER, uid);
   }
 
   async function getJourney(
     uid: string,
     journeyId: string,
   ): Promise<request.Response> {
-    currentUid = uid;
-    return request(app.getHttpServer()).get(`/journeys/${journeyId}`);
+    return request(app.getHttpServer())
+      .get(`/journeys/${journeyId}`)
+      .set(TEST_UID_HEADER, uid);
   }
 
   // --- JRNY-02: regression -- no active journey, start succeeds ------------
 
   it('JRNY-02: a leader with no active journey can start their only PENDING journey', async () => {
-    const uid = 'jrny02-leader';
+    const uid = uidFor('jrny02-leader');
     await seedLeader(uid);
 
     const journeyId = await createJourney(uid, 'JRNY-02 journey');
@@ -182,7 +206,7 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
   // --- JRNY-01: already-active leader gets 409 ------------------------------
 
   it('JRNY-01: a leader with an ACTIVE journey gets 409 ALREADY_IN_ACTIVE_JOURNEY starting a second PENDING journey', async () => {
-    const uid = 'jrny01-leader';
+    const uid = uidFor('jrny01-leader');
     await seedLeader(uid);
 
     const journeyAId = await createJourney(uid, 'JRNY-01 journey A');
@@ -208,7 +232,7 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
   // --- JRNY-04: end A then start B succeeds ---------------------------------
 
   it('JRNY-04: ending journey A then starting journey B succeeds end-to-end for the same leader', async () => {
-    const uid = 'jrny04-leader';
+    const uid = uidFor('jrny04-leader');
     await seedLeader(uid);
 
     const journeyAId = await createJourney(uid, 'JRNY-04 journey A');
@@ -232,19 +256,29 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
   // --- JRNY-03: race-safety under real concurrency --------------------------
 
   it('JRNY-03: two concurrent start() calls for the same leader cannot both create ACTIVE journeys', async () => {
-    const uid = 'jrny03-leader';
+    const uid = uidFor('jrny03-leader');
     await seedLeader(uid);
 
+    // Two distinct PENDING journeys for the SAME leader -- both requests
+    // target different journeyIds but must race against the same
+    // idx_journeys_one_active_per_leader(leader_id) slot, which is exactly
+    // the scenario the partial unique index + 23505 catch defends.
     const journeyCId = await createJourney(uid, 'JRNY-03 journey C');
     const journeyDId = await createJourney(uid, 'JRNY-03 journey D');
 
-    // Fire both start() HTTP calls concurrently via Promise.all so they are
-    // genuinely in flight together, racing against the real partial unique
-    // index + the service's transactional pre-check / 23505 catch.
-    currentUid = uid;
+    // Fire both start() HTTP calls concurrently via Promise.all, each
+    // carrying its own explicit per-request uid header (not a shared
+    // mutable variable), so they are genuinely in flight together racing
+    // against the real partial unique index + the service's transactional
+    // pre-check / 23505 catch, with no cross-request identity hazard
+    // regardless of how the two requests interleave or resolve.
     const [resC, resD] = await Promise.all([
-      request(app.getHttpServer()).post(`/journeys/${journeyCId}/start`),
-      request(app.getHttpServer()).post(`/journeys/${journeyDId}/start`),
+      request(app.getHttpServer())
+        .post(`/journeys/${journeyCId}/start`)
+        .set(TEST_UID_HEADER, uid),
+      request(app.getHttpServer())
+        .post(`/journeys/${journeyDId}/start`)
+        .set(TEST_UID_HEADER, uid),
     ]);
 
     const statuses = [resC.status, resD.status].sort();
