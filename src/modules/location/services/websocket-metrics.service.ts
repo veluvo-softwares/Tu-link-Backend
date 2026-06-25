@@ -273,14 +273,17 @@ export class WebSocketMetricsService {
   }
 
   /**
-   * Record a force_disconnect event: sockets force-disconnected for a uid as
-   * a result of the user logging out. Always emits a structured info log;
-   * the Redis counter increment is best-effort and never causes this method
-   * to throw (mirrors AuthMetricsService.recordTransientBypass).
+   * Record a force_disconnect event: sockets *targeted* for force-disconnect
+   * for a uid as a result of the user logging out. `socketCount` is the size
+   * of the room at fetch time, not a post-disconnect confirmation -- socket.io's
+   * disconnectSockets() returns void, so there is no way to confirm how many
+   * sockets were actually torn down. Always emits a structured info log; the
+   * Redis counter increment is best-effort and never causes this method to
+   * throw (mirrors AuthMetricsService.recordTransientBypass).
    */
   async recordForceDisconnect(uid: string, socketCount: number): Promise<void> {
     this.logger.info(
-      'WebSocket force-disconnected on logout',
+      'WebSocket force-disconnect targeted on logout',
       'WebSocketMetricsService',
       {
         event: 'force_disconnect',
