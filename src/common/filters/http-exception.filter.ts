@@ -74,6 +74,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
         const response = exceptionResponse as {
           message: string | string[];
           error?: string;
+          activeJourneyId?: string;
         };
 
         // Check if it's a validation error
@@ -112,6 +113,9 @@ export class HttpExceptionFilter implements ExceptionFilter {
           error: {
             code: this.getErrorCode(exception, response),
             details: null,
+            ...(response.activeJourneyId !== undefined && {
+              activeJourneyId: response.activeJourneyId,
+            }),
           },
         };
       }
