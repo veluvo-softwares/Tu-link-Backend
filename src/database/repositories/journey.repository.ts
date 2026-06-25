@@ -165,12 +165,13 @@ export class JourneyRepository {
     journeyId: string,
     status: JourneyStatus,
     opts: { setStartTime?: boolean; setEndTime?: boolean } = {},
+    tx?: NodePgDatabase<typeof schema>,
   ): Promise<JourneyRecord | null> {
     const set: Record<string, unknown> = { status, updatedAt: sql`now()` };
     if (opts.setStartTime) set.startTime = sql`now()`;
     if (opts.setEndTime) set.endTime = sql`now()`;
 
-    const [row] = await this.db
+    const [row] = await (tx ?? this.db)
       .update(journeys)
       .set(set)
       .where(eq(journeys.id, journeyId))

@@ -5,9 +5,11 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../shared/redis/redis.service';
+import { DatabaseService } from '../../database/database.service';
 import { JourneyRepository } from '../../database/repositories/journey.repository';
 import { UsersRepository } from '../../database/repositories/users.repository';
 import { ParticipantService } from './services/participant.service';
@@ -24,6 +26,7 @@ export class JourneyService {
     private journeyRepository: JourneyRepository,
     private usersRepository: UsersRepository,
     private redisService: RedisService,
+    private databaseService: DatabaseService,
     private participantService: ParticipantService,
     private notificationService: NotificationService,
     private configService: ConfigService,
@@ -147,8 +150,41 @@ export class JourneyService {
       throw new BadRequestException('Journey already started or completed');
     }
 
-    await this.journeyRepository.updateStatus(journeyId, 'ACTIVE', {
-      setStartTime: true,
+    await this.databaseService.db.transaction(async (tx) => {
+      const activeJourney = await this.journeyRepository.findActiveByLeader(
+        tx,
+        journey.leaderId,
+      );
+
+      if (activeJourney && activeJourney.id !== journeyId) {
+        throw new ConflictException({
+          message: 'You already have an active journey',
+          error: 'ALREADY_IN_ACTIVE_JOURNEY',
+          activeJourneyId: activeJourney.id,
+        });
+      }
+
+      try {
+        await this.journeyRepository.updateStatus(
+          journeyId,
+          'ACTIVE',
+          { setStartTime: true },
+          tx,
+        );
+      } catch (error) {
+        if ((error as { code?: string }).code === '23505') {
+          const conflicting = await this.journeyRepository.findActiveByLeader(
+            tx,
+            journey.leaderId,
+          );
+          throw new ConflictException({
+            message: 'You already have an active journey',
+            error: 'ALREADY_IN_ACTIVE_JOURNEY',
+            activeJourneyId: conflicting?.id,
+          });
+        }
+        throw error;
+      }
     });
 
     // Capture who is being activated BEFORE the bulk update (the filter below
