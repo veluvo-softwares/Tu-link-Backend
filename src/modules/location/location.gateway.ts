@@ -169,6 +169,14 @@ export class LocationGateway
    */
   @OnEvent('auth.logout')
   async handleAuthLogout(payload: { uid: string }): Promise<void> {
+    if (!this.server) {
+      this.logger.warn(
+        `auth.logout received before WS server init; sockets for ${payload.uid} not disconnected`,
+        'LocationGateway',
+      );
+      return;
+    }
+
     try {
       const room = `user:${payload.uid}`;
       const sockets = await this.server.in(room).fetchSockets();
