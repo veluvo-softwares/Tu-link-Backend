@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { JourneyStatus } from '../../types/journey-status.type';
 import { LatLng } from '../schema/columns/geography-point';
 import { DatabaseService } from '../database.service';
+import * as schema from '../schema';
 import { JourneyMetadata, journeys } from '../schema';
 
 export interface JourneyRecord {
@@ -112,6 +114,23 @@ export class JourneyRepository {
       .select(this.selection())
       .from(journeys)
       .where(eq(journeys.id, journeyId))
+      .limit(1);
+    return row ? this.toRecord(row) : null;
+  }
+
+  // tx-aware read of the leader's current ACTIVE journey — meant to be called
+  // with the same `tx` handle the caller's db.transaction() uses for the
+  // subsequent status-flip write, so both see a consistent snapshot.
+  async findActiveByLeader(
+    tx: NodePgDatabase<typeof schema>,
+    leaderId: string,
+  ): Promise<JourneyRecord | null> {
+    const [row] = await tx
+      .select(this.selection())
+      .from(journeys)
+      .where(
+        and(eq(journeys.leaderId, leaderId), eq(journeys.status, 'ACTIVE')),
+      )
       .limit(1);
     return row ? this.toRecord(row) : null;
   }
