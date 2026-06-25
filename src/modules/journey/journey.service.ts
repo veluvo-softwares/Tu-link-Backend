@@ -150,42 +150,53 @@ export class JourneyService {
       throw new BadRequestException('Journey already started or completed');
     }
 
-    await this.databaseService.db.transaction(async (tx) => {
-      const activeJourney = await this.journeyRepository.findActiveByLeader(
-        tx,
-        journey.leaderId,
-      );
+    try {
+      await this.databaseService.db.transaction(async (tx) => {
+        const activeJourney = await this.journeyRepository.findActiveByLeader(
+          tx,
+          journey.leaderId,
+        );
 
-      if (activeJourney && activeJourney.id !== journeyId) {
-        throw new ConflictException({
-          message: 'You already have an active journey',
-          error: 'ALREADY_IN_ACTIVE_JOURNEY',
-          activeJourneyId: activeJourney.id,
-        });
-      }
+        if (activeJourney && activeJourney.id !== journeyId) {
+          throw new ConflictException({
+            message: 'You already have an active journey',
+            error: 'ALREADY_IN_ACTIVE_JOURNEY',
+            activeJourneyId: activeJourney.id,
+          });
+        }
 
-      try {
         await this.journeyRepository.updateStatus(
           journeyId,
           'ACTIVE',
           { setStartTime: true },
           tx,
         );
-      } catch (error) {
-        if ((error as { code?: string }).code === '23505') {
-          const conflicting = await this.journeyRepository.findActiveByLeader(
-            tx,
-            journey.leaderId,
-          );
-          throw new ConflictException({
-            message: 'You already have an active journey',
-            error: 'ALREADY_IN_ACTIVE_JOURNEY',
-            activeJourneyId: conflicting?.id,
-          });
-        }
-        throw error;
+      });
+    } catch (error) {
+      // Drizzle's node-postgres driver wraps the raw pg error in a
+      // DrizzleQueryError, so the Postgres error code lives on `.cause`, not
+      // directly on the thrown error. A 23505 here is the rare concurrent
+      // race where both requests passed the pre-check. Postgres aborts the
+      // whole transaction on this error (25P02 on any further command in the
+      // same tx), so the re-query for activeJourneyId MUST run after the
+      // transaction has rolled back, using the regular (non-tx) db handle —
+      // querying via `tx` here would itself fail with 25P02.
+      const pgCode =
+        (error as { code?: string }).code ??
+        (error as { cause?: { code?: string } }).cause?.code;
+      if (pgCode === '23505') {
+        const conflicting = await this.journeyRepository.findActiveByLeader(
+          this.databaseService.db,
+          journey.leaderId,
+        );
+        throw new ConflictException({
+          message: 'You already have an active journey',
+          error: 'ALREADY_IN_ACTIVE_JOURNEY',
+          activeJourneyId: conflicting?.id,
+        });
       }
-    });
+      throw error;
+    }
 
     // Capture who is being activated BEFORE the bulk update (the filter below
     // keys off the pre-activation ACCEPTED/LEADER state for Redis + notifications).
