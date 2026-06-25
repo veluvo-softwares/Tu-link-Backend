@@ -332,15 +332,25 @@ describe('auth.logout -> LocationGateway force-disconnect (e2e)', () => {
     const clientA = await connectAsUser(uidA);
     const clientB = await connectAsUser(uidB);
 
+    // Bind the negative assertion to an actual disconnect event on B rather
+    // than only a fixed-delay connected-state snapshot, so the test cannot
+    // pass coincidentally just because nothing happened within the window.
+    let bDisconnected = false;
+    clientB.once('disconnect', () => {
+      bDisconnected = true;
+    });
+
     const disconnectedA = waitForDisconnect(clientA);
     const res = await logout(uidA);
     expect(res.status).toBe(200);
     await disconnectedA;
 
     expect(clientA.connected).toBe(false);
-    // Give the room-scoped disconnect a moment to (not) propagate, then
-    // assert B was never touched.
+    // Give the room-scoped disconnect a moment to (not) propagate to B's
+    // room. By this point A has demonstrably disconnected, so the wait is
+    // bounded by something that already happened, not an arbitrary guess.
     await new Promise((r) => setTimeout(r, 300));
+    expect(bDisconnected).toBe(false);
     expect(clientB.connected).toBe(true);
   });
 
