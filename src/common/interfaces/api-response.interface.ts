@@ -18,6 +18,7 @@ export interface ApiErrorResponse {
     code: string;
     details?: any;
     stack?: string;
+    activeJourneyId?: string;
   };
 }
 
