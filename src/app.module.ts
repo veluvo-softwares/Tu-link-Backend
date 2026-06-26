@@ -11,12 +11,14 @@ import firebaseConfig from './config/firebase.config';
 import redisConfig from './config/redis.config';
 import mapsConfig from './config/maps.config';
 import databaseConfig from './config/database.config';
+import authConfig from './config/auth.config';
 
 // Shared modules
 import { FirebaseModule } from './shared/firebase/firebase.module';
 import { RedisModule } from './shared/redis/redis.module';
 import { DatabaseModule } from './database/database.module';
 import { LoggerModule } from './shared/logger/logger.module';
+import { AuthMetricsModule } from './modules/auth/services/auth-metrics.module';
 
 // Feature modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -37,6 +39,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
         redisConfig,
         mapsConfig,
         databaseConfig,
+        authConfig,
       ],
     }),
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
@@ -45,6 +48,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     FirebaseModule,
     RedisModule,
     DatabaseModule,
+    AuthMetricsModule,
     // Feature modules
     AuthModule,
     JourneyModule,

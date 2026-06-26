@@ -13,6 +13,7 @@ import { ConfigService } from '@nestjs/config';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
 import { UsersRepository } from '../../database/repositories/users.repository';
 import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
+import { RedisService } from '../../shared/redis/redis.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -39,6 +40,7 @@ export class AuthService {
     private usersRepository: UsersRepository,
     private configService: ConfigService,
     private emailService: TuLinkResendEmailService,
+    private redisService: RedisService,
   ) {
     this.firebaseApiKey =
       this.configService.get<string>('firebase.apiKey') || '';
@@ -388,6 +390,8 @@ export class AuthService {
       }
 
       await this.firebaseService.auth.revokeRefreshTokens(uid);
+
+      await this.redisService.invalidateRevocationCache(uid);
 
       // No-op if the row doesn't exist (matches the prior exists-check).
       await this.usersRepository.setLastLogout(uid);
