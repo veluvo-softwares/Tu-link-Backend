@@ -111,7 +111,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
           message: messageString || exception.message,
           error: {
             code: this.getErrorCode(exception, response),
-            details: response.error || null,
+            details: null,
           },
         };
       }
@@ -178,6 +178,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       [HttpStatus.UNPROCESSABLE_ENTITY]: 'UNPROCESSABLE_ENTITY',
       [HttpStatus.TOO_MANY_REQUESTS]: 'TOO_MANY_REQUESTS',
       [HttpStatus.INTERNAL_SERVER_ERROR]: 'INTERNAL_SERVER_ERROR',
+      [HttpStatus.BAD_GATEWAY]: 'BAD_GATEWAY',
+      [HttpStatus.SERVICE_UNAVAILABLE]: 'SERVICE_UNAVAILABLE',
     };
 
     return errorCodeMap[status] || 'UNKNOWN_ERROR';

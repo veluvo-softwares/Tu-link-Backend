@@ -17,10 +17,9 @@ import {
 } from '@nestjs/swagger';
 import { FirebaseAuthGuard } from '../../../common/guards/firebase-auth.guard';
 import { MapsService } from '../services/maps.service';
-import { SearchPlacesDto, ReverseGeocodeDto, GetRouteDto } from '../dto';
+import { SearchPlacesDto, GetRouteDto } from '../dto';
 import {
   SearchPlacesResponse,
-  ReverseGeocodeResult,
   RouteResult,
 } from '../interfaces/place-result.interface';
 
@@ -54,28 +53,6 @@ export class MapsController {
       searchDto.regionCode,
     );
     return { results };
-  }
-
-  @Get('reverse')
-  @ApiOperation({ summary: 'Reverse geocode coordinates to address' })
-  @ApiResponse({
-    status: 200,
-    description: 'Address found successfully',
-    type: ReverseGeocodeResult,
-  })
-  @ApiResponse({ status: 401, description: 'Unauthorized - Invalid JWT token' })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad Request - Invalid coordinates',
-  })
-  async reverseGeocode(
-    @Query(new ValidationPipe({ transform: true, whitelist: true }))
-    reverseDto: ReverseGeocodeDto,
-  ): Promise<ReverseGeocodeResult> {
-    return await this.mapsService.reverseGeocode(
-      reverseDto.lat,
-      reverseDto.lng,
-    );
   }
 
   @Post('route')
