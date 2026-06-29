@@ -394,24 +394,8 @@ export class AuthService {
     }
   }
 
-  async logout(uid: string, isGuest = false): Promise<{ message: string }> {
+  async logout(uid: string): Promise<{ message: string }> {
     try {
-      if (isGuest) {
-        // Delete the anonymous account entirely — nothing to preserve
-        await this.firebaseService.auth.deleteUser(uid);
-        // Force-disconnect any live /location sockets for this uid. Harmless
-        // no-op if the guest has no live sockets. Fire-and-forget: logout
-        // success must not depend on socket teardown completing.
-        const handled = this.eventEmitter.emit('auth.logout', { uid });
-        if (!handled) {
-          this.logger.warn(
-            `auth.logout emitted but no listener handled it (uid=${uid})`,
-            'AuthService',
-          );
-        }
-        return { message: 'Successfully logged out' };
-      }
-
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
       await this.redisService.invalidateRevocationCache(uid);
@@ -468,40 +452,6 @@ export class AuthService {
     } catch (error) {
       console.error('User search error:', error);
       throw new InternalServerErrorException('Failed to search users');
-    }
-  }
-
-  async guestSignIn(): Promise<AuthResponse> {
-    try {
-      const response = await axios.post(
-        `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
-        { returnSecureToken: true },
-        { timeout: 8000 },
-      );
-
-      const { localId, idToken, refreshToken, expiresIn } = response.data as {
-        localId: string;
-        idToken: string;
-        refreshToken: string;
-        expiresIn: string;
-      };
-
-      return {
-        user: {
-          uid: localId,
-          email: '',
-          displayName: 'Guest',
-          emailVerified: false,
-        },
-        tokens: {
-          idToken,
-          refreshToken,
-          expiresIn: parseInt(expiresIn),
-        },
-      };
-    } catch (error) {
-      console.error('Guest sign-in error:', error);
-      throw new UnauthorizedException('Guest sign-in failed');
     }
   }
 

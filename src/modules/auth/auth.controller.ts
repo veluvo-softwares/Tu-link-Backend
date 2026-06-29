@@ -87,27 +87,6 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
-  @Post('guest-sign-in')
-  @Throttle({ default: { ttl: 60000, limit: 5 } })
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'Sign in as a guest using Firebase Anonymous Authentication',
-    description: `Creates an anonymous Firebase session without requiring email or password.
-Each call creates a distinct anonymous Firebase user (no session/user reuse).
-
-Returns a valid Firebase ID token that is accepted by FirebaseAuthGuard on all protected endpoints.
-No persistent user document is created; the anonymous account is deleted on logout.`,
-  })
-  @ApiResponse({
-    status: 200,
-    description:
-      'Guest sign-in successful. Returns anonymous user data with tokens.',
-  })
-  @ApiResponse({ status: 401, description: 'Guest sign-in failed' })
-  async guestSignIn() {
-    return this.authService.guestSignIn();
-  }
-
   @Post('social')
   @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
@@ -182,11 +161,8 @@ tokens. On first social sign-in a matching Postgres user row is created
     status: 401,
     description: 'Unauthorized - invalid or expired token',
   })
-  async logout(
-    @CurrentUser('uid') uid: string,
-    @CurrentUser('isGuest') isGuest: boolean,
-  ) {
-    return this.authService.logout(uid, isGuest);
+  async logout(@CurrentUser('uid') uid: string) {
+    return this.authService.logout(uid);
   }
 
   @Get('profile')

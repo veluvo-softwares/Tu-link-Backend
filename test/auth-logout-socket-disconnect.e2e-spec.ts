@@ -141,16 +141,15 @@ describe('auth.logout -> LocationGateway force-disconnect (e2e)', () => {
   // sequencing brittle mockResolvedValueOnce calls.
   const tokenToUid = new Map<string, string>();
 
-  // Guest test uids (matching the convention used elsewhere in this spec)
-  // authenticate as anonymous sign-ins so AuthService.logout() takes the
-  // isGuest branch (delete + emit) instead of the revoke + emit branch.
+  // All sessions authenticate via a standard provider; AuthService.logout()
+  // always takes the revoke + emit path (guest sign-in has been removed).
   const decodedToken = (uid: string) => ({
     uid,
     email: `${uid}@example.com`,
     email_verified: true,
     iat: Math.floor(Date.now() / 1000) - 100,
     firebase: {
-      sign_in_provider: uid.includes('guest') ? 'anonymous' : 'password',
+      sign_in_provider: 'password',
     },
   });
 
@@ -379,21 +378,23 @@ describe('auth.logout -> LocationGateway force-disconnect (e2e)', () => {
     expect(payload.userId).toBe(uidA);
   });
 
-  // --- Regression: guest logout with zero live sockets is a harmless no-op ---
+  // --- Regression: logout with zero live sockets is a harmless no-op ---
 
-  it('regression: logging out a guest with no live sockets does not throw and still returns 200', async () => {
-    const guestUid = 'sock-guest-no-sockets';
-    const token = `token-${guestUid}`;
-    tokenToUid.set(token, guestUid);
+  it('regression: logging out a user with no live sockets does not throw and still returns 200', async () => {
+    const uid = 'sock-no-sockets';
+    const token = `token-${uid}`;
+    tokenToUid.set(token, uid);
 
     const res = await request(app.getHttpServer())
       .post('/auth/logout')
       .set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(200);
-    // Guest branch deletes the anonymous Firebase user then emits
-    // auth.logout; with zero live sockets in the user:{uid} room, the
-    // gateway's disconnectSockets(true) call is a harmless no-op.
-    expect(firebaseServiceStub.auth.deleteUser).toHaveBeenCalledWith(guestUid);
+    // logout() revokes refresh tokens then emits auth.logout; with zero live
+    // sockets in the user:{uid} room, the gateway's disconnectSockets(true)
+    // call is a harmless no-op.
+    expect(firebaseServiceStub.auth.revokeRefreshTokens).toHaveBeenCalledWith(
+      uid,
+    );
   });
 });

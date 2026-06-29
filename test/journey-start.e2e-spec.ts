@@ -28,7 +28,7 @@ import { DatabaseService } from './../src/database/database.service';
 // stubbed, following the precedent in maps.e2e-spec.ts / auth-guard.e2e-spec.ts.
 
 interface MockAuthRequest {
-  user?: { uid: string; isGuest: boolean };
+  user?: { uid: string };
   headers: Record<string, string | string[] | undefined>;
 }
 
@@ -82,7 +82,7 @@ describe('Journey start (e2e) -- JRNY-01..04', () => {
           const req = context.switchToHttp().getRequest<MockAuthRequest>();
           const headerUid = req.headers[TEST_UID_HEADER];
           const uid = Array.isArray(headerUid) ? headerUid[0] : headerUid;
-          req.user = { uid: uid ?? 'unset', isGuest: false };
+          req.user = { uid: uid ?? 'unset' };
           return true;
         },
       })

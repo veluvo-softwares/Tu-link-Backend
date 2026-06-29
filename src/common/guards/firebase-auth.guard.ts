@@ -18,7 +18,6 @@ interface AuthRequest {
     uid: string;
     email?: string;
     emailVerified?: boolean;
-    isGuest?: boolean;
   };
 }
 
@@ -87,82 +86,71 @@ export class FirebaseAuthGuard implements CanActivate {
       throw new UnauthorizedException('Please login again', 'AUTH_FAILED');
     }
 
-    const isGuest = decodedToken.firebase?.sign_in_provider === 'anonymous';
+    const uid = decodedToken.uid;
+    let tokensValidAfterTime: string | null =
+      await this.redisService.getCachedRevocation(uid);
 
-    // Skip revocation check for anonymous sessions — they have no re-login path
-    // and getUser can fail with auth/user-not-found after account deletion.
-    if (!isGuest) {
-      const uid = decodedToken.uid;
-      let tokensValidAfterTime: string | null =
-        await this.redisService.getCachedRevocation(uid);
+    if (tokensValidAfterTime === NO_REVOCATION_SENTINEL) {
+      // Cache hit on "checked, no revocation" — skip getUser() and skip
+      // the iat comparison entirely. Terminal early return.
+      request.user = {
+        uid: decodedToken.uid,
+        email: decodedToken.email,
+        emailVerified: decodedToken.email_verified,
+      };
+      return true;
+    } else if (tokensValidAfterTime === null) {
+      try {
+        const userRecord = await this.firebaseService.auth.getUser(uid);
+        tokensValidAfterTime = userRecord.tokensValidAfterTime ?? null;
 
-      if (tokensValidAfterTime === NO_REVOCATION_SENTINEL) {
-        // Cache hit on "checked, no revocation" — skip getUser() and skip
-        // the iat comparison entirely. Terminal early return.
-        request.user = {
-          uid: decodedToken.uid,
-          email: decodedToken.email,
-          emailVerified: decodedToken.email_verified,
-          isGuest,
-        };
-        return true;
-      } else if (tokensValidAfterTime === null) {
-        try {
-          const userRecord = await this.firebaseService.auth.getUser(uid);
-          tokensValidAfterTime = userRecord.tokensValidAfterTime ?? null;
+        const ttl =
+          this.configService.get<number>('auth.revocationCacheTtlSeconds') ??
+          60;
+        await this.redisService.setCachedRevocation(
+          uid,
+          tokensValidAfterTime ?? NO_REVOCATION_SENTINEL,
+          ttl,
+        );
+      } catch (error) {
+        if (isTransientRevocationError(error)) {
+          const code =
+            (error as { errorInfo?: { code?: string }; code?: string })
+              .errorInfo?.code ??
+            (error as { code?: string }).code ??
+            '';
+          await this.authMetricsService.recordTransientBypass(uid, code);
 
-          const ttl =
-            this.configService.get<number>('auth.revocationCacheTtlSeconds') ??
-            60;
-          await this.redisService.setCachedRevocation(
-            uid,
-            tokensValidAfterTime ?? NO_REVOCATION_SENTINEL,
-            ttl,
-          );
-        } catch (error) {
-          if (isTransientRevocationError(error)) {
-            const code =
+          request.user = {
+            uid: decodedToken.uid,
+            email: decodedToken.email,
+            emailVerified: decodedToken.email_verified,
+          };
+          return true;
+        }
+
+        this.logger.error(
+          'FirebaseAuthGuard revocation check failed:',
+          undefined,
+          'FirebaseAuthGuard',
+          {
+            code:
               (error as { errorInfo?: { code?: string }; code?: string })
                 .errorInfo?.code ??
               (error as { code?: string }).code ??
-              '';
-            await this.authMetricsService.recordTransientBypass(uid, code);
-
-            request.user = {
-              uid: decodedToken.uid,
-              email: decodedToken.email,
-              emailVerified: decodedToken.email_verified,
-              isGuest,
-            };
-            return true;
-          }
-
-          this.logger.error(
-            'FirebaseAuthGuard revocation check failed:',
-            undefined,
-            'FirebaseAuthGuard',
-            {
-              code:
-                (error as { errorInfo?: { code?: string }; code?: string })
-                  .errorInfo?.code ??
-                (error as { code?: string }).code ??
-                String(error),
-            },
-          );
-          throw new UnauthorizedException('Please login again', 'AUTH_FAILED');
-        }
+              String(error),
+          },
+        );
+        throw new UnauthorizedException('Please login again', 'AUTH_FAILED');
       }
+    }
 
-      if (tokensValidAfterTime) {
-        const tokenIssuedAt = new Date(decodedToken.iat * 1000);
-        const tokensValidAfter = new Date(tokensValidAfterTime);
+    if (tokensValidAfterTime) {
+      const tokenIssuedAt = new Date(decodedToken.iat * 1000);
+      const tokensValidAfter = new Date(tokensValidAfterTime);
 
-        if (tokenIssuedAt < tokensValidAfter) {
-          throw new UnauthorizedException(
-            'Please login again',
-            'TOKEN_REVOKED',
-          );
-        }
+      if (tokenIssuedAt < tokensValidAfter) {
+        throw new UnauthorizedException('Please login again', 'TOKEN_REVOKED');
       }
     }
 
@@ -170,7 +158,6 @@ export class FirebaseAuthGuard implements CanActivate {
       uid: decodedToken.uid,
       email: decodedToken.email,
       emailVerified: decodedToken.email_verified,
-      isGuest,
     };
     return true;
   }
