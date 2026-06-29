@@ -21,6 +21,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { SocialLoginDto } from './dto/social-login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -105,6 +106,42 @@ No persistent user document is created; the anonymous account is deleted on logo
   @ApiResponse({ status: 401, description: 'Guest sign-in failed' })
   async guestSignIn() {
     return this.authService.guestSignIn();
+  }
+
+  @Post('social')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Sign in / sign up with a social provider (Google or Apple)',
+    description: `Exchange a provider OIDC id token (obtained on-device via the
+native Google/Apple SDK) for a standard Tu-Link session via Firebase
+\`accounts:signInWithIdp\`. Backend-mediated: the client never mints Firebase
+tokens. On first social sign-in a matching Postgres user row is created
+(invariant A).
+
+**Body:**
+- \`provider\`: \`'google'\` or \`'apple'\`
+- \`idToken\`: provider OIDC id token
+- \`nonce\`: raw (unhashed) nonce — **required for Apple**
+- \`displayName\` (optional): Apple supplies the name only on first auth, so the
+  client forwards it here
+
+**Returns:**
+- User profile data
+- Firebase ID token (valid for 1 hour)
+- Refresh token
+- Token expiration time`,
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Social sign-in successful. Returns user data with tokens.',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid provider credential or nonce',
+  })
+  async social(@Body() socialLoginDto: SocialLoginDto) {
+    return this.authService.socialSignIn(socialLoginDto);
   }
 
   @Post('refresh')
