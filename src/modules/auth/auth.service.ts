@@ -10,12 +10,18 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
-import { UsersRepository } from '../../database/repositories/users.repository';
+import {
+  UsersRepository,
+  UpdateUserInput,
+} from '../../database/repositories/users.repository';
 import { TuLinkResendEmailService } from '../../shared/email/tulink-resend-email.service';
 import { RedisService } from '../../shared/redis/redis.service';
+import { LoggerService } from '../../shared/logger/logger.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { SocialLoginDto } from './dto/social-login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { User } from '../../shared/interfaces/user.interface';
 import { AuthResponse } from './interfaces/auth-response.interface';
@@ -34,6 +40,8 @@ export class AuthService {
   private readonly FIREBASE_AUTH_API =
     'https://identitytoolkit.googleapis.com/v1/accounts';
   private readonly firebaseApiKey: string;
+  // requestUri required by accounts:signInWithIdp (the federated sign-in flow).
+  private readonly firebaseAuthDomain: string;
 
   constructor(
     private firebaseService: FirebaseService,
@@ -41,12 +49,17 @@ export class AuthService {
     private configService: ConfigService,
     private emailService: TuLinkResendEmailService,
     private redisService: RedisService,
+    private eventEmitter: EventEmitter2,
+    private logger: LoggerService,
   ) {
     this.firebaseApiKey =
       this.configService.get<string>('firebase.apiKey') || '';
     if (!this.firebaseApiKey) {
       throw new Error('Firebase API Key is not configured');
     }
+    this.firebaseAuthDomain =
+      this.configService.get<string>('firebase.authDomain') ||
+      'https://localhost';
   }
 
   async register(registerDto: RegisterDto): Promise<AuthResponse> {
@@ -381,17 +394,23 @@ export class AuthService {
     }
   }
 
-  async logout(uid: string, isGuest = false): Promise<{ message: string }> {
+  async logout(uid: string): Promise<{ message: string }> {
     try {
-      if (isGuest) {
-        // Delete the anonymous account entirely — nothing to preserve
-        await this.firebaseService.auth.deleteUser(uid);
-        return { message: 'Successfully logged out' };
-      }
-
       await this.firebaseService.auth.revokeRefreshTokens(uid);
 
       await this.redisService.invalidateRevocationCache(uid);
+
+      // Force-disconnect any live /location sockets for this uid, scoped to
+      // the user:{uid} room (never a broadcast). Emitted after the
+      // security-critical revoke + cache-invalidate calls above. Fire-and-
+      // forget: logout success must not depend on socket teardown completing.
+      const handled = this.eventEmitter.emit('auth.logout', { uid });
+      if (!handled) {
+        this.logger.warn(
+          `auth.logout emitted but no listener handled it (uid=${uid})`,
+          'AuthService',
+        );
+      }
 
       // No-op if the row doesn't exist (matches the prior exists-check).
       await this.usersRepository.setLastLogout(uid);
@@ -436,38 +455,146 @@ export class AuthService {
     }
   }
 
-  async guestSignIn(): Promise<AuthResponse> {
+  /**
+   * Social sign-in / sign-up via Firebase REST accounts:signInWithIdp.
+   *
+   * The device obtains a provider OIDC id token through the native SDK only;
+   * token issuance stays here (backend-mediated). Social login creates brand-new
+   * Firebase users, so we MUST upsert the matching Postgres row (invariant A) or
+   * leave an orphan UID with no profile.
+   */
+  async socialSignIn(dto: SocialLoginDto): Promise<AuthResponse> {
+    const providerId = dto.provider === 'google' ? 'google.com' : 'apple.com';
+
+    // Build the postBody signInWithIdp expects. For Apple we thread the RAW
+    // nonce: Firebase recomputes sha256(rawNonce) and matches it against the
+    // token's nonce claim (the #1 Apple failure point).
+    const params = new URLSearchParams({
+      id_token: dto.idToken,
+      providerId,
+    });
+    if (dto.provider === 'apple') {
+      if (!dto.nonce) {
+        throw new BadRequestException('nonce is required for Apple sign-in');
+      }
+      params.set('nonce', dto.nonce);
+    }
+    const postBody = params.toString();
+
+    let firebaseData: {
+      localId: string;
+      idToken: string;
+      refreshToken: string;
+      expiresIn: string;
+      email?: string;
+      displayName?: string;
+    };
+
     try {
       const response = await axios.post(
-        `${this.FIREBASE_AUTH_API}:signUp?key=${this.firebaseApiKey}`,
-        { returnSecureToken: true },
-        { timeout: 8000 },
+        `${this.FIREBASE_AUTH_API}:signInWithIdp?key=${this.firebaseApiKey}`,
+        {
+          postBody,
+          requestUri: this.firebaseAuthDomain,
+          returnSecureToken: true,
+          returnIdpCredential: true,
+        },
       );
-
-      const { localId, idToken, refreshToken, expiresIn } = response.data as {
-        localId: string;
-        idToken: string;
-        refreshToken: string;
-        expiresIn: string;
-      };
-
-      return {
-        user: {
-          uid: localId,
-          email: '',
-          displayName: 'Guest',
-          emailVerified: false,
-        },
-        tokens: {
-          idToken,
-          refreshToken,
-          expiresIn: parseInt(expiresIn),
-        },
-      };
+      firebaseData = response.data;
     } catch (error) {
-      console.error('Guest sign-in error:', error);
-      throw new UnauthorizedException('Guest sign-in failed');
+      if (error.response?.data?.error) {
+        const message: string | undefined = error.response.data.error.message;
+
+        if (message?.startsWith('INVALID_IDP_RESPONSE')) {
+          throw new UnauthorizedException('Invalid social sign-in credential');
+        }
+        if (message?.startsWith('MISSING_OR_INVALID_NONCE')) {
+          throw new UnauthorizedException(
+            'Invalid or missing nonce for Apple sign-in',
+          );
+        }
+        if (message?.startsWith('FEDERATED_USER_ID_ALREADY_LINKED')) {
+          throw new UnauthorizedException(
+            'This social account is already linked to another user',
+          );
+        }
+        if (message === 'USER_DISABLED') {
+          throw new UnauthorizedException('This account has been disabled');
+        }
+        if (message) {
+          throw new UnauthorizedException(
+            'Social sign-in failed. Please try again',
+          );
+        }
+      }
+      throw new UnauthorizedException('Unable to complete social sign-in');
     }
+
+    const { localId, idToken, refreshToken, expiresIn } = firebaseData;
+    // Apple private-relay emails (@privaterelay.appleid.com) are valid → store
+    // as-is. Google/Apple emails arrive already verified.
+    const resolvedEmail = firebaseData.email ?? '';
+    const resolvedDisplayName =
+      dto.displayName ||
+      firebaseData.displayName ||
+      this.deriveDisplayName(resolvedEmail);
+
+    // Invariant A — ensure a Postgres row exists for this Firebase UID.
+    const existing = await this.usersRepository.findById(localId);
+
+    if (!existing) {
+      try {
+        await this.usersRepository.create({
+          id: localId,
+          email: resolvedEmail,
+          displayName: resolvedDisplayName,
+          emailVerified: true,
+          phoneVerified: false,
+        });
+      } catch (dbError) {
+        // The Firebase user already exists by this point. Unlike register(), we
+        // do NOT delete it on a DB-write failure — the user may simply retry.
+        // Surface a clean 500 rather than leaking the raw DB error.
+        console.error(
+          `Failed to create Postgres row for social user ${localId}:`,
+          dbError,
+        );
+        throw new InternalServerErrorException('Failed to create user profile');
+      }
+    } else {
+      // Backfill fields the provider now supplies but the existing row lacks.
+      const patch: UpdateUserInput = {};
+      if (!existing.displayName && resolvedDisplayName) {
+        patch.displayName = resolvedDisplayName;
+      }
+      if (!existing.email && resolvedEmail) {
+        patch.email = resolvedEmail;
+      }
+      if (Object.keys(patch).length > 0) {
+        await this.usersRepository.update(localId, patch);
+      }
+    }
+
+    return {
+      user: {
+        uid: localId,
+        email: resolvedEmail,
+        displayName: existing?.displayName || resolvedDisplayName,
+        emailVerified: true,
+      },
+      tokens: {
+        idToken,
+        refreshToken,
+        expiresIn: parseInt(expiresIn),
+      },
+    };
+  }
+
+  // Fallback display name when the provider supplies neither a name nor (for
+  // Apple after first auth) anything beyond the email.
+  private deriveDisplayName(email: string): string {
+    const localPart = email.split('@')[0]?.trim();
+    return localPart || 'User';
   }
 
   /**

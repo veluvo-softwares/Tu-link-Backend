@@ -1,9 +1,11 @@
 import { Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { JourneyStatus } from '../../types/journey-status.type';
 import { LatLng } from '../schema/columns/geography-point';
 import { DatabaseService } from '../database.service';
+import * as schema from '../schema';
 import { JourneyMetadata, journeys } from '../schema';
 
 export interface JourneyRecord {
@@ -116,6 +118,30 @@ export class JourneyRepository {
     return row ? this.toRecord(row) : null;
   }
 
+  // tx-aware read of the leader's current ACTIVE journey. This is a plain
+  // SELECT under the default READ COMMITTED isolation -- it does NOT lock
+  // the row and does NOT by itself prevent two concurrent transactions from
+  // both observing "no active journey" and proceeding to the write. It is
+  // only a fast-path / friendly-UX pre-check so the common case returns a
+  // clean 409 without round-tripping through a unique-violation. The actual
+  // race-safety guarantee comes from the partial unique index
+  // (idx_journeys_one_active_per_leader) plus the caller's 23505 catch,
+  // which is what serializes concurrent winners/losers. Do not remove the
+  // 23505 handling on the assumption that this pre-check is sufficient.
+  async findActiveByLeader(
+    tx: NodePgDatabase<typeof schema>,
+    leaderId: string,
+  ): Promise<JourneyRecord | null> {
+    const [row] = await tx
+      .select(this.selection())
+      .from(journeys)
+      .where(
+        and(eq(journeys.leaderId, leaderId), eq(journeys.status, 'ACTIVE')),
+      )
+      .limit(1);
+    return row ? this.toRecord(row) : null;
+  }
+
   async update(
     journeyId: string,
     patch: UpdateJourneyInput,
@@ -146,12 +172,13 @@ export class JourneyRepository {
     journeyId: string,
     status: JourneyStatus,
     opts: { setStartTime?: boolean; setEndTime?: boolean } = {},
+    tx?: NodePgDatabase<typeof schema>,
   ): Promise<JourneyRecord | null> {
     const set: Record<string, unknown> = { status, updatedAt: sql`now()` };
     if (opts.setStartTime) set.startTime = sql`now()`;
     if (opts.setEndTime) set.endTime = sql`now()`;
 
-    const [row] = await this.db
+    const [row] = await (tx ?? this.db)
       .update(journeys)
       .set(set)
       .where(eq(journeys.id, journeyId))

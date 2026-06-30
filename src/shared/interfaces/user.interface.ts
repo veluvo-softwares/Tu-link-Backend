@@ -5,7 +5,6 @@ export interface User {
   phoneNumber?: string;
   emailVerified?: boolean;
   phoneVerified?: boolean;
-  isGuest?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
