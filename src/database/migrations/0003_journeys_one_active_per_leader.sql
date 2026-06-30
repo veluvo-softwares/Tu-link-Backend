@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "idx_journeys_one_active_per_leader" ON "journeys" USING btree ("leader_id") WHERE status = 'ACTIVE';

@@ -12,7 +12,6 @@ export interface CreateUserInput {
   phoneNumber?: string;
   emailVerified?: boolean;
   phoneVerified?: boolean;
-  isGuest?: boolean;
 }
 
 export interface UpdateUserInput {
@@ -52,7 +51,6 @@ export class UsersRepository {
         phoneNumber: input.phoneNumber,
         emailVerified: input.emailVerified ?? false,
         phoneVerified: input.phoneVerified ?? false,
-        isGuest: input.isGuest ?? false,
       })
       .returning();
     return row;

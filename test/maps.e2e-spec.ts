@@ -16,7 +16,7 @@ import { RedisService } from './../src/shared/redis/redis.service';
 import { FirebaseService } from './../src/shared/firebase/firebase.service';
 
 interface MockAuthRequest {
-  user?: { uid: string; isGuest: boolean };
+  user?: { uid: string };
 }
 
 // supertest types `res.body` as `any`; these shapes let assertions stay type-safe.
@@ -62,7 +62,7 @@ describe('MapsController (e2e)', () => {
       .useValue({
         canActivate: (context: ExecutionContext) => {
           const req = context.switchToHttp().getRequest<MockAuthRequest>();
-          req.user = { uid: 'test-uid', isGuest: false };
+          req.user = { uid: 'test-uid' };
           return true;
         },
       })

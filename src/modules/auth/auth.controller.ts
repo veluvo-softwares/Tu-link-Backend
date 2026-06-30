@@ -21,6 +21,7 @@ import {
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { SocialLoginDto } from './dto/social-login.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
@@ -86,25 +87,40 @@ export class AuthController {
     return this.authService.login(loginDto);
   }
 
-  @Post('guest-sign-in')
-  @Throttle({ default: { ttl: 60000, limit: 5 } })
+  @Post('social')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'Sign in as a guest using Firebase Anonymous Authentication',
-    description: `Creates an anonymous Firebase session without requiring email or password.
-Each call creates a distinct anonymous Firebase user (no session/user reuse).
+    summary: 'Sign in / sign up with a social provider (Google or Apple)',
+    description: `Exchange a provider OIDC id token (obtained on-device via the
+native Google/Apple SDK) for a standard Tu-Link session via Firebase
+\`accounts:signInWithIdp\`. Backend-mediated: the client never mints Firebase
+tokens. On first social sign-in a matching Postgres user row is created
+(invariant A).
 
-Returns a valid Firebase ID token that is accepted by FirebaseAuthGuard on all protected endpoints.
-No persistent user document is created; the anonymous account is deleted on logout.`,
+**Body:**
+- \`provider\`: \`'google'\` or \`'apple'\`
+- \`idToken\`: provider OIDC id token
+- \`nonce\`: raw (unhashed) nonce — **required for Apple**
+- \`displayName\` (optional): Apple supplies the name only on first auth, so the
+  client forwards it here
+
+**Returns:**
+- User profile data
+- Firebase ID token (valid for 1 hour)
+- Refresh token
+- Token expiration time`,
   })
   @ApiResponse({
     status: 200,
-    description:
-      'Guest sign-in successful. Returns anonymous user data with tokens.',
+    description: 'Social sign-in successful. Returns user data with tokens.',
   })
-  @ApiResponse({ status: 401, description: 'Guest sign-in failed' })
-  async guestSignIn() {
-    return this.authService.guestSignIn();
+  @ApiResponse({
+    status: 401,
+    description: 'Invalid provider credential or nonce',
+  })
+  async social(@Body() socialLoginDto: SocialLoginDto) {
+    return this.authService.socialSignIn(socialLoginDto);
   }
 
   @Post('refresh')
@@ -145,11 +161,8 @@ No persistent user document is created; the anonymous account is deleted on logo
     status: 401,
     description: 'Unauthorized - invalid or expired token',
   })
-  async logout(
-    @CurrentUser('uid') uid: string,
-    @CurrentUser('isGuest') isGuest: boolean,
-  ) {
-    return this.authService.logout(uid, isGuest);
+  async logout(@CurrentUser('uid') uid: string) {
+    return this.authService.logout(uid);
   }
 
   @Get('profile')
@@ -344,6 +357,7 @@ No persistent user document is created; the anonymous account is deleted on logo
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Send password reset email',
@@ -364,6 +378,7 @@ No persistent user document is created; the anonymous account is deleted on logo
   }
 
   @Post('reset-password')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Reset password using OOB code',
