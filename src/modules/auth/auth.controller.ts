@@ -357,6 +357,7 @@ tokens. On first social sign-in a matching Postgres user row is created
   }
 
   @Post('forgot-password')
+  @Throttle({ default: { ttl: 60000, limit: 5 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Send password reset email',
@@ -377,6 +378,7 @@ tokens. On first social sign-in a matching Postgres user row is created
   }
 
   @Post('reset-password')
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Reset password using OOB code',
