@@ -73,6 +73,54 @@ export class JourneyService {
     return journey as unknown as Journey;
   }
 
+  /**
+   * Orchestrate a participant leaving a journey.
+   * Fetches participants with displayNames BEFORE the DB leave (while the actor
+   * is still in the list), resolves recipients, commits the leave, then fires
+   * a best-effort PARTICIPANT_LEFT notification (NOTIF-07, D-12).
+   */
+  async leaveJourney(journeyId: string, userId: string): Promise<void> {
+    // a. Fetch participants with displayNames BEFORE the leave so the actor is
+    //    still present and their displayName can be resolved (RESEARCH.md Pitfall 5).
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
+
+    // b. Resolve the leaving participant's display name.
+    const leavingParticipant = participants.find((p) => p.userId === userId);
+    const leavingParticipantName =
+      leavingParticipant?.displayName ?? 'A participant';
+
+    // c. Resolve notification recipients before the leave (actor still in list,
+    //    resolveParticipantRecipients will exclude them per D-01).
+    const recipientIds = this.notificationService.resolveParticipantRecipients(
+      participants,
+      userId,
+    );
+
+    // d. Commit the critical user action — must succeed before any notification.
+    await this.participantService.leaveJourney(journeyId, userId);
+
+    // e. Best-effort notification — mirrors start() post-commit block (D-12).
+    try {
+      const journey = await this.findById(journeyId);
+      await this.notificationService.sendParticipantLeft(
+        journeyId,
+        journey.name,
+        leavingParticipantName,
+        userId,
+        recipientIds,
+      );
+    } catch (err) {
+      this.logger.error(
+        'Post-leave notification failed for journey ' + journeyId,
+        err instanceof Error ? err.stack : undefined,
+        'JourneyService',
+        { journeyId, userId },
+      );
+      // Do NOT rethrow — the leave is already committed.
+    }
+  }
+
   async update(
     journeyId: string,
     userId: string,
@@ -400,6 +448,31 @@ export class JourneyService {
       displayName,
       status: journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED',
     });
+
+    // Best-effort PARTICIPANT_JOINED notification for existing members (NOTIF-09, D-01/D-12).
+    try {
+      const participants =
+        await this.participantService.getJourneyParticipants(journeyId);
+      const recipientIds =
+        this.notificationService.resolveParticipantRecipients(
+          participants,
+          userId,
+        );
+      await this.notificationService.sendParticipantJoined(
+        journeyId,
+        journey.name,
+        displayName,
+        recipientIds,
+      );
+    } catch (err) {
+      this.logger.error(
+        'Post-accept notification failed for journey ' + journeyId,
+        err instanceof Error ? err.stack : undefined,
+        'JourneyService',
+        { journeyId, userId },
+      );
+      // Do NOT rethrow — the accept is already committed.
+    }
   }
 
   async inviteParticipant(
