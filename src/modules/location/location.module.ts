@@ -14,6 +14,7 @@ import { FirebaseModule } from '../../shared/firebase/firebase.module';
 import { RedisModule } from '../../shared/redis/redis.module';
 import { JourneyModule } from '../journey/journey.module';
 import { MapsModule } from '../maps/maps.module';
+import { NotificationModule } from '../notification/notification.module';
 import appConfig from '../../config/app.config';
 
 @Module({
@@ -23,6 +24,7 @@ import appConfig from '../../config/app.config';
     RedisModule,
     forwardRef(() => JourneyModule),
     MapsModule,
+    NotificationModule,
   ],
   controllers: [LocationController],
   providers: [

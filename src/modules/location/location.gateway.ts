@@ -28,6 +28,7 @@ import { LocationUpdateDto } from './dto/location-update.dto';
 import { AcknowledgeDto } from './dto/acknowledge.dto';
 import { ResyncDto } from './dto/resync.dto';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
+import { NotificationService } from '../notification/notification.service';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -58,6 +59,7 @@ export class LocationGateway
     private webSocketMetricsService: WebSocketMetricsService,
     private configService: ConfigService,
     private logger: LoggerService,
+    private notificationService: NotificationService,
   ) {}
 
   /**
@@ -416,6 +418,38 @@ export class LocationGateway
             allArrived,
             timestamp: Date.now(),
           });
+
+        // Best-effort ARRIVAL_DETECTED notification (NOTIF-08, D-02/D-12).
+        // Excludes the arriver from recipients via resolveParticipantRecipients.
+        try {
+          const participants =
+            await this.participantService.getJourneyParticipants(
+              payload.journeyId,
+            );
+          const arrivingParticipant = participants.find(
+            (p) => p.userId === userId,
+          );
+          const participantName =
+            arrivingParticipant?.displayName ?? 'A participant';
+          const recipientIds =
+            this.notificationService.resolveParticipantRecipients(
+              participants,
+              userId,
+            );
+          const journey = await this.journeyService.findById(payload.journeyId);
+          await this.notificationService.sendArrivalDetected(
+            payload.journeyId,
+            journey.name,
+            participantName,
+            recipientIds,
+          );
+        } catch (err) {
+          this.logger.error(
+            `Arrival notification failed for journey ${payload.journeyId}: ${(err as Error).message}`,
+            'LocationGateway',
+          );
+          // Do NOT rethrow — mirrors handleAuthLogout error pattern.
+        }
 
         // Auto-complete the journey when everyone has arrived
         if (allArrived) {
