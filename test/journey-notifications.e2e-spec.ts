@@ -313,4 +313,130 @@ describe('Journey Notifications (e2e) -- Phase 05', () => {
       expect(joinerRow).toBeUndefined(); // D-01: joiner must NOT receive their own join
     });
   });
+
+  // ─── NOTIF-01: setup-confirmation push ─────────────────────────────────────
+
+  describe('NOTIF-01: setup-confirmation push on first FCM token registration', () => {
+    it('calls FcmService.sendToUser with SETUP_CONFIRMATION and creates zero notifications rows', async () => {
+      const userId = uidFor('notif01-user');
+      await seedUser(userId, 'N1 User');
+
+      // POST /notifications/fcm-token for a user with NO existing tokens.
+      // registerFcmToken() fires sendSetupConfirmationPush() as fire-and-forget
+      // after detecting the 0→1 token transition.
+      const tokenRes = await request(app.getHttpServer())
+        .post('/notifications/fcm-token')
+        .set(TEST_UID_HEADER, userId)
+        .send({ fcmToken: `test-device-token-${userId}` });
+
+      expect(tokenRes.status).toBe(201);
+
+      // The fire-and-forget sendSetupConfirmationPush calls fcmTokenRepository
+      // .getTokens() (real DB) then fcmService.sendToUser (mocked). Give the
+      // microtask queue time to complete the DB round-trip before asserting.
+      await new Promise((r) => setTimeout(r, 300));
+
+      // FCM assertion: sendToUser must have been called with SETUP_CONFIRMATION
+      // (T-05-11: correct userId, single call, data.type verified).
+      expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({ type: 'SETUP_CONFIRMATION' }),
+        }),
+      );
+
+      // DB assertion: NEVER write a notifications table row for setup-confirmation
+      // (D-05/D-06: no journey context for this push type).
+      const notifCount = await databaseService.db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.recipientId, userId));
+
+      expect(notifCount).toHaveLength(0);
+    });
+  });
+
+  // ─── NOTIF-02: permission-status endpoint ──────────────────────────────────
+
+  describe('NOTIF-02: GET /notifications/permission-status returns 200', () => {
+    it('is reachable and returns HTTP 200 for an authenticated user', async () => {
+      const userId = uidFor('notif02-user');
+      await seedUser(userId, 'N2 User');
+
+      const res = await request(app.getHttpServer())
+        .get('/notifications/permission-status')
+        .set(TEST_UID_HEADER, userId);
+
+      expect(res.status).toBe(200);
+    });
+  });
+
+  // ─── NOTIF-03/04/05: data envelope — type key present ──────────────────────
+
+  describe('NOTIF-03/04/05: FCM data envelope carries type key for JOURNEY_INVITE, JOURNEY_STARTED, JOURNEY_ENDED', () => {
+    it('each push action includes data.type in the FCM payload', async () => {
+      const leaderId = uidFor('env-leader');
+      const memberId = uidFor('env-member');
+      const inviteeId = uidFor('env-invitee');
+
+      await seedUser(leaderId, 'Env Leader', /* isLeader */ true);
+      await seedUser(memberId, 'Env Member');
+      await seedUser(inviteeId, 'Env Invitee');
+
+      const journeyId = await createJourney(leaderId, 'Envelope Test Journey');
+
+      // Invite and accept existing_member so there is at least one recipient for
+      // JOURNEY_STARTED and JOURNEY_ENDED notifications.
+      await inviteParticipant(leaderId, journeyId, memberId);
+      await acceptInvitation(memberId, journeyId);
+
+      // ── Action B (NOTIF-03 — JOURNEY_INVITE) ───────────────────────────────
+      // Invite must happen before start (journey must be PENDING).
+      // Deviation from plan action order (A/B/C → B/A/C): the plan listed
+      // JOURNEY_STARTED as action A and JOURNEY_INVITE as B, but invite requires
+      // a PENDING journey — Rule 1 auto-fix: reorder to match the API constraint.
+      fcmServiceMock.sendToUser.mockClear();
+
+      await inviteParticipant(leaderId, journeyId, inviteeId);
+
+      expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({ type: 'JOURNEY_INVITE' }),
+        }),
+      );
+
+      // ── Action A (NOTIF-04 — JOURNEY_STARTED) ──────────────────────────────
+      fcmServiceMock.sendToUser.mockClear();
+
+      await startJourney(leaderId, journeyId);
+
+      expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({ type: 'JOURNEY_STARTED' }),
+        }),
+      );
+
+      // ── Action C (NOTIF-05 — JOURNEY_ENDED) ────────────────────────────────
+      fcmServiceMock.sendToUser.mockClear();
+
+      const endRes = await request(app.getHttpServer())
+        .post(`/journeys/${journeyId}/end`)
+        .set(TEST_UID_HEADER, leaderId);
+
+      expect(endRes.status).toBe(201);
+
+      expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
+        expect.any(Array),
+        expect.objectContaining({
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+          data: expect.objectContaining({ type: 'JOURNEY_ENDED' }),
+        }),
+      );
+    });
+  });
 });
