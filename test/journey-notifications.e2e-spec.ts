@@ -59,6 +59,27 @@ describe('Journey Notifications (e2e) -- Phase 05', () => {
   const runToken = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const uidFor = (label: string): string => `${runToken}-${label}`;
 
+  /**
+   * Poll an assertion until it passes or the timeout elapses. Used instead of
+   * fixed sleeps when awaiting fire-and-forget work (e.g. the setup
+   * confirmation push), which is timing-dependent under CI load.
+   */
+  const waitFor = async (
+    assertion: () => void,
+    { timeout = 2000, interval = 50 } = {},
+  ): Promise<void> => {
+    const start = Date.now();
+    for (;;) {
+      try {
+        assertion();
+        return;
+      } catch (err) {
+        if (Date.now() - start > timeout) throw err;
+        await new Promise((r) => setTimeout(r, interval));
+      }
+    }
+  };
+
   const createdUserIds: string[] = [];
   const leaderUserIds: string[] = [];
 
@@ -332,18 +353,18 @@ describe('Journey Notifications (e2e) -- Phase 05', () => {
       expect(tokenRes.status).toBe(201);
 
       // The fire-and-forget sendSetupConfirmationPush calls fcmTokenRepository
-      // .getTokens() (real DB) then fcmService.sendToUser (mocked). Give the
-      // microtask queue time to complete the DB round-trip before asserting.
-      await new Promise((r) => setTimeout(r, 300));
-
+      // .getTokens() (real DB) then fcmService.sendToUser (mocked). Poll until
+      // the DB round-trip completes rather than relying on a fixed sleep.
       // FCM assertion: sendToUser must have been called with SETUP_CONFIRMATION
       // (T-05-11: correct userId, single call, data.type verified).
-      expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
-        expect.any(Array),
-        expect.objectContaining({
-          // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-          data: expect.objectContaining({ type: 'SETUP_CONFIRMATION' }),
-        }),
+      await waitFor(() =>
+        expect(fcmServiceMock.sendToUser).toHaveBeenCalledWith(
+          expect.any(Array),
+          expect.objectContaining({
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+            data: expect.objectContaining({ type: 'SETUP_CONFIRMATION' }),
+          }),
+        ),
       );
 
       // DB assertion: NEVER write a notifications table row for setup-confirmation

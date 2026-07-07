@@ -443,11 +443,19 @@ export class JourneyService {
     const user = await this.usersRepository.findById(userId);
     const displayName = user?.displayName || 'Unknown';
 
-    void this.locationGateway.broadcastParticipantAccepted(journeyId, {
-      userId,
-      displayName,
-      status: journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED',
-    });
+    // Fire-and-forget so accepting is not blocked on the room-membership
+    // logging inside the broadcast; log rejections instead of discarding them.
+    this.locationGateway
+      .broadcastParticipantAccepted(journeyId, {
+        userId,
+        displayName,
+        status: journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED',
+      })
+      .catch((err: Error) =>
+        console.error(
+          `broadcastParticipantAccepted failed for journey ${journeyId}, user ${userId}: ${err.message}`,
+        ),
+      );
 
     // Best-effort PARTICIPANT_JOINED notification for existing members (NOTIF-09, D-01/D-12).
     try {

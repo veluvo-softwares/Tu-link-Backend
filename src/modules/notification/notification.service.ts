@@ -89,23 +89,20 @@ export class NotificationService {
   }
 
   /**
-   * Send journey started notification
+   * Fan out one notification per recipient, tolerating partial failure.
+   * Rejections are logged and counted in Redis (a total plus a per-type key
+   * so partial-failure counts are actionable per notification type); never
+   * rethrows so callers stay best-effort.
    */
-  async sendJourneyStarted(
+  private async fanOutNotifications(
+    type: string,
     journeyId: string,
-    journeyName: string,
     recipientIds: string[],
+    buildDto: (recipientId: string) => CreateNotificationDto,
   ): Promise<void> {
     const results = await Promise.allSettled(
       recipientIds.map((recipientId) =>
-        this.createNotification({
-          journeyId,
-          recipientId,
-          type: 'JOURNEY_STARTED',
-          title: 'Journey Started',
-          body: `The journey "${journeyName}" has begun!`,
-          data: { type: 'JOURNEY_STARTED', journeyId, journeyName },
-        }),
+        this.createNotification(buildDto(recipientId)),
       ),
     );
 
@@ -116,7 +113,7 @@ export class NotificationService {
         'NotificationService',
         {
           event: 'notification_fanout_failure',
-          type: 'JOURNEY_STARTED',
+          type,
           journeyId,
           attemptedCount: recipientIds.length,
           failedCount: failed.length,
@@ -124,13 +121,36 @@ export class NotificationService {
         },
       );
       try {
-        await this.redisService
-          .getClient()
-          .incr('notification:metrics:fanout_failure:total');
+        const client = this.redisService.getClient();
+        await client.incr('notification:metrics:fanout_failure:total');
+        await client.incr(`notification:metrics:fanout_failure:${type}`);
       } catch {
         // best-effort counter — never rethrow
       }
     }
+  }
+
+  /**
+   * Send journey started notification
+   */
+  async sendJourneyStarted(
+    journeyId: string,
+    journeyName: string,
+    recipientIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_STARTED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_STARTED',
+        title: 'Journey Started',
+        body: `The journey "${journeyName}" has begun!`,
+        data: { type: 'JOURNEY_STARTED', journeyId, journeyName },
+      }),
+    );
   }
 
   /**
@@ -141,41 +161,19 @@ export class NotificationService {
     journeyName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      recipientIds.map((recipientId) =>
-        this.createNotification({
-          journeyId,
-          recipientId,
-          type: 'JOURNEY_ENDED',
-          title: 'Journey Completed',
-          body: `The journey "${journeyName}" has ended`,
-          data: { type: 'JOURNEY_ENDED', journeyId, journeyName },
-        }),
-      ),
+    await this.fanOutNotifications(
+      'JOURNEY_ENDED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_ENDED',
+        title: 'Journey Completed',
+        body: `The journey "${journeyName}" has ended`,
+        data: { type: 'JOURNEY_ENDED', journeyId, journeyName },
+      }),
     );
-
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
-      this.logger.warn(
-        'Partial notification fan-out failure',
-        'NotificationService',
-        {
-          event: 'notification_fanout_failure',
-          type: 'JOURNEY_ENDED',
-          journeyId,
-          attemptedCount: recipientIds.length,
-          failedCount: failed.length,
-          timestamp: new Date().toISOString(),
-        },
-      );
-      try {
-        await this.redisService
-          .getClient()
-          .incr('notification:metrics:fanout_failure:total');
-      } catch {
-        // best-effort counter — never rethrow
-      }
-    }
   }
 
   /**
@@ -210,46 +208,24 @@ export class NotificationService {
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      recipientIds.map((recipientId) =>
-        this.createNotification({
-          journeyId,
-          recipientId,
-          type: 'PARTICIPANT_JOINED',
-          title: 'Participant Joined',
-          body: `${participantName} joined the journey`,
-          data: {
-            type: 'PARTICIPANT_JOINED',
-            journeyId,
-            journeyName,
-            participantName,
-          },
-        }),
-      ),
-    );
-
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
-      this.logger.warn(
-        'Partial notification fan-out failure',
-        'NotificationService',
-        {
-          event: 'notification_fanout_failure',
+    await this.fanOutNotifications(
+      'PARTICIPANT_JOINED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'PARTICIPANT_JOINED',
+        title: 'Participant Joined',
+        body: `${participantName} joined the journey`,
+        data: {
           type: 'PARTICIPANT_JOINED',
           journeyId,
-          attemptedCount: recipientIds.length,
-          failedCount: failed.length,
-          timestamp: new Date().toISOString(),
+          journeyName,
+          participantName,
         },
-      );
-      try {
-        await this.redisService
-          .getClient()
-          .incr('notification:metrics:fanout_failure:total');
-      } catch {
-        // best-effort counter — never rethrow
-      }
-    }
+      }),
+    );
   }
 
   /**
@@ -261,46 +237,24 @@ export class NotificationService {
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      recipientIds.map((recipientId) =>
-        this.createNotification({
-          journeyId,
-          recipientId,
-          type: 'ARRIVAL_DETECTED',
-          title: 'Arrival Detected',
-          body: `${participantName} has arrived at the destination`,
-          data: {
-            type: 'ARRIVAL_DETECTED',
-            journeyId,
-            journeyName,
-            participantName,
-          },
-        }),
-      ),
-    );
-
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
-      this.logger.warn(
-        'Partial notification fan-out failure',
-        'NotificationService',
-        {
-          event: 'notification_fanout_failure',
+    await this.fanOutNotifications(
+      'ARRIVAL_DETECTED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'ARRIVAL_DETECTED',
+        title: 'Arrival Detected',
+        body: `${participantName} has arrived at the destination`,
+        data: {
           type: 'ARRIVAL_DETECTED',
           journeyId,
-          attemptedCount: recipientIds.length,
-          failedCount: failed.length,
-          timestamp: new Date().toISOString(),
+          journeyName,
+          participantName,
         },
-      );
-      try {
-        await this.redisService
-          .getClient()
-          .incr('notification:metrics:fanout_failure:total');
-      } catch {
-        // best-effort counter — never rethrow
-      }
-    }
+      }),
+    );
   }
 
   /**
@@ -313,46 +267,24 @@ export class NotificationService {
     actorId: string,
     recipientIds: string[],
   ): Promise<void> {
-    const results = await Promise.allSettled(
-      recipientIds.map((recipientId) =>
-        this.createNotification({
-          journeyId,
-          recipientId,
-          type: 'PARTICIPANT_LEFT',
-          title: 'Participant Left',
-          body: `${participantName} has left the journey`,
-          data: {
-            type: 'PARTICIPANT_LEFT',
-            journeyId,
-            journeyName,
-            participantName,
-          },
-        }),
-      ),
-    );
-
-    const failed = results.filter((r) => r.status === 'rejected');
-    if (failed.length > 0) {
-      this.logger.warn(
-        'Partial notification fan-out failure',
-        'NotificationService',
-        {
-          event: 'notification_fanout_failure',
+    await this.fanOutNotifications(
+      'PARTICIPANT_LEFT',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'PARTICIPANT_LEFT',
+        title: 'Participant Left',
+        body: `${participantName} has left the journey`,
+        data: {
           type: 'PARTICIPANT_LEFT',
           journeyId,
-          attemptedCount: recipientIds.length,
-          failedCount: failed.length,
-          timestamp: new Date().toISOString(),
+          journeyName,
+          participantName,
         },
-      );
-      try {
-        await this.redisService
-          .getClient()
-          .incr('notification:metrics:fanout_failure:total');
-      } catch {
-        // best-effort counter — never rethrow
-      }
-    }
+      }),
+    );
 
     // actorId is kept in the signature for tracing context; recipient resolution
     // has already excluded the actor before this method is called.
