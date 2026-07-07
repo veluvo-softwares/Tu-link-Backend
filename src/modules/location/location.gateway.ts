@@ -221,6 +221,10 @@ export class LocationGateway
 
       // Join Socket.io room
       await client.join(`journey:${journeyId}`);
+      this.logger.info(
+        `[ROOM-DEBUG] socket ${client.id} (user ${userId}) JOINED room journey:${journeyId} @ ${Date.now()}`,
+        'LocationGateway',
+      );
 
       // Store journey in client data
       client.data.journeyId = journeyId;
@@ -712,10 +716,38 @@ export class LocationGateway
   }
 
   /**
+   * Log every socket currently in a journey room at emit time. Used to confirm
+   * whether a recipient (e.g. the leader) is actually in the room when a live
+   * event fires, vs. still mid-join (the room-join race). [ROOM-DEBUG]
+   */
+  private async logRoomMembers(
+    journeyId: string,
+    event: string,
+  ): Promise<void> {
+    try {
+      const sockets = await this.server
+        .in(`journey:${journeyId}`)
+        .fetchSockets();
+      const members = sockets.map(
+        (s) => `${s.id}(u:${(s.data as { userId?: string })?.userId ?? '?'})`,
+      );
+      this.logger.info(
+        `[ROOM-DEBUG] emit '${event}' to journey:${journeyId} @ ${Date.now()} — ${sockets.length} socket(s) in room: [${members.join(', ')}]`,
+        'LocationGateway',
+      );
+    } catch (e) {
+      this.logger.warn(
+        `[ROOM-DEBUG] fetchSockets failed for journey:${journeyId}: ${(e as Error).message}`,
+        'LocationGateway',
+      );
+    }
+  }
+
+  /**
    * Broadcast journey started event
    */
-  // eslint-disable-next-line @typescript-eslint/require-await
   async broadcastJourneyStarted(journeyId: string, journey: any) {
+    await this.logRoomMembers(journeyId, 'journey-started');
     this.server.to(`journey:${journeyId}`).emit('journey-started', {
       journey,
       timestamp: Date.now(),
@@ -733,7 +765,8 @@ export class LocationGateway
     });
   }
 
-  broadcastParticipantAccepted(journeyId: string, data: object) {
+  async broadcastParticipantAccepted(journeyId: string, data: object) {
+    await this.logRoomMembers(journeyId, 'participant-accepted');
     this.server.to(`journey:${journeyId}`).emit('participant-accepted', data);
   }
 

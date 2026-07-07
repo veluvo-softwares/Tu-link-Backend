@@ -443,7 +443,7 @@ export class JourneyService {
     const user = await this.usersRepository.findById(userId);
     const displayName = user?.displayName || 'Unknown';
 
-    this.locationGateway.broadcastParticipantAccepted(journeyId, {
+    void this.locationGateway.broadcastParticipantAccepted(journeyId, {
       userId,
       displayName,
       status: journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED',
