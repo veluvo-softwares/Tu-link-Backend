@@ -273,7 +273,7 @@ export class JourneyController {
     description: 'Journey not found OR Not a participant',
   })
   async leave(@Param('id') id: string, @CurrentUser('uid') userId: string) {
-    await this.participantService.leaveJourney(id, userId);
+    await this.journeyService.leaveJourney(id, userId);
     return { message: 'Left journey successfully' };
   }
 }
