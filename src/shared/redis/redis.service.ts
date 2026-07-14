@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { CachedLocation } from '../interfaces/location.interface';
 import { LoggerService } from '../logger/logger.service';
+import { LagSeverity } from '../../types/notification.type';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -197,6 +198,40 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       this.logger.warn(
         `Failed to invalidate revocation cache for uid ${uid}: ${(error as Error).message}`,
+        'RedisService',
+      );
+    }
+  }
+
+  // Lag alert cooldown (per-member-per-severity)
+  async getLagAlertCooldown(
+    journeyId: string,
+    userId: string,
+  ): Promise<LagSeverity | null> {
+    try {
+      const key = `lag:cooldown:${journeyId}:${userId}`;
+      return (await this.client.get(key)) as LagSeverity | null;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to read lag cooldown for ${journeyId}/${userId}: ${(error as Error).message}`,
+        'RedisService',
+      );
+      return null;
+    }
+  }
+
+  async setLagAlertCooldown(
+    journeyId: string,
+    userId: string,
+    severity: LagSeverity,
+    ttlSeconds: number,
+  ): Promise<void> {
+    try {
+      const key = `lag:cooldown:${journeyId}:${userId}`;
+      await this.client.setex(key, ttlSeconds, severity);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to write lag cooldown for ${journeyId}/${userId}: ${(error as Error).message}`,
         'RedisService',
       );
     }
