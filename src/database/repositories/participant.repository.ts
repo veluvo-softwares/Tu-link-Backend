@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import {
   ConnectionStatus,
   ParticipantRole,
@@ -20,6 +20,7 @@ export interface ParticipantRecord {
   leftAt: Date | null;
   lastSeenAt: Date | null;
   arrivedAt: Date | null;
+  convergedAt: Date | null;
   deviceInfo: ParticipantDeviceInfo | null;
   displayName?: string;
 }
@@ -47,6 +48,7 @@ const toRecord = (row: Row, displayName?: string): ParticipantRecord => ({
   leftAt: row.leftAt,
   lastSeenAt: row.lastSeenAt,
   arrivedAt: row.arrivedAt,
+  convergedAt: row.convergedAt,
   deviceInfo: row.deviceInfo,
   ...(displayName !== undefined ? { displayName } : {}),
 });
@@ -84,6 +86,7 @@ export class ParticipantRepository {
           // stale lifecycle timestamps and connection state must be cleared.
           leftAt: null,
           arrivedAt: null,
+          convergedAt: null,
           lastSeenAt: null,
           connectionStatus: 'DISCONNECTED',
         },
@@ -218,6 +221,30 @@ export class ParticipantRepository {
           eq(participants.journeyId, journeyId),
           eq(participants.userId, userId),
           ne(participants.status, 'ARRIVED'),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
+  // Atomic convergence transition: only flips a not-yet-converged participant.
+  // Returns the row when this call performed the update, null when it was
+  // already converged (or the participant does not exist) — the isNull guard
+  // (instead of markArrivedIfNotArrived's status check) makes the D-06
+  // "permanent, first-time-only" guarantee race-safe without a separate
+  // check-then-update.
+  async setConvergedIfNotConverged(
+    journeyId: string,
+    userId: string,
+  ): Promise<ParticipantRecord | null> {
+    const [row] = await this.db
+      .update(participants)
+      .set({ convergedAt: sql`now()` })
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          eq(participants.userId, userId),
+          isNull(participants.convergedAt),
         ),
       )
       .returning();
