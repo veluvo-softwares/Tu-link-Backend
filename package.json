@@ -6,9 +6,9 @@
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
-    "docker:dev": "docker compose -f config/docker/docker-compose.dev.yml --profile local up -d --build",
+    "docker:dev": "docker compose -f config/docker/docker-compose.dev.yml -f config/docker/docker-compose.local.yml --profile local up -d --build",
     "docker:rebuild:server": "docker compose -f docker-compose.dev.yml --profile server up -d --build api-dev",
-    "docker:down": "docker compose -f config/docker/docker-compose.dev.yml down",
+    "docker:down": "docker compose -f config/docker/docker-compose.dev.yml -f config/docker/docker-compose.local.yml --profile \"*\" down",
     "docker:rebuild:redis": "docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --force-recreate redis api-dev",
     "deploy": "./deploy.sh",
     "build": "nest build",

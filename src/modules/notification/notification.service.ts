@@ -2,7 +2,6 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Logger,
 } from '@nestjs/common';
 import { FcmService } from './services/fcm.service';
 import { CreateNotificationDto } from './dto/create-notification.dto';
@@ -10,17 +9,37 @@ import { Notification } from '../../shared/interfaces/notification.interface';
 import { NotificationRepository } from '../../database/repositories/notification.repository';
 import { FcmTokenRepository } from '../../database/repositories/fcm-token.repository';
 import { UsersRepository } from '../../database/repositories/users.repository';
+import { LoggerService } from '../../shared/logger/logger.service';
+import { RedisService } from '../../shared/redis/redis.service';
+import { Participant } from '../../shared/interfaces/participant.interface';
 
 @Injectable()
 export class NotificationService {
-  private readonly logger = new Logger(NotificationService.name);
-
   constructor(
     private notificationRepository: NotificationRepository,
     private fcmTokenRepository: FcmTokenRepository,
     private usersRepository: UsersRepository,
     private fcmService: FcmService,
+    private logger: LoggerService,
+    private redisService: RedisService,
   ) {}
+
+  /**
+   * Filter participants to notification recipients (D-01/D-03).
+   * Includes ACTIVE or LEADER participants, excluding the actor.
+   */
+  public resolveParticipantRecipients(
+    participants: Participant[],
+    actorId: string,
+  ): string[] {
+    return participants
+      .filter(
+        (p) =>
+          (p.status === 'ACTIVE' || p.role === 'LEADER') &&
+          p.userId !== actorId,
+      )
+      .map((p) => p.userId);
+  }
 
   /**
    * Create and send a notification
@@ -65,8 +84,50 @@ export class NotificationService {
       type: 'JOURNEY_INVITE',
       title: 'Journey Invitation',
       body: `${inviterName} invited you to join "${journeyName}"`,
-      data: { journeyId, journeyName, inviterName },
+      data: { type: 'JOURNEY_INVITE', journeyId, journeyName, inviterName },
     });
+  }
+
+  /**
+   * Fan out one notification per recipient, tolerating partial failure.
+   * Rejections are logged and counted in Redis (a total plus a per-type key
+   * so partial-failure counts are actionable per notification type); never
+   * rethrows so callers stay best-effort.
+   */
+  private async fanOutNotifications(
+    type: string,
+    journeyId: string,
+    recipientIds: string[],
+    buildDto: (recipientId: string) => CreateNotificationDto,
+  ): Promise<void> {
+    const results = await Promise.allSettled(
+      recipientIds.map((recipientId) =>
+        this.createNotification(buildDto(recipientId)),
+      ),
+    );
+
+    const failed = results.filter((r) => r.status === 'rejected');
+    if (failed.length > 0) {
+      this.logger.warn(
+        'Partial notification fan-out failure',
+        'NotificationService',
+        {
+          event: 'notification_fanout_failure',
+          type,
+          journeyId,
+          attemptedCount: recipientIds.length,
+          failedCount: failed.length,
+          timestamp: new Date().toISOString(),
+        },
+      );
+      try {
+        const client = this.redisService.getClient();
+        await client.incr('notification:metrics:fanout_failure:total');
+        await client.incr(`notification:metrics:fanout_failure:${type}`);
+      } catch {
+        // best-effort counter — never rethrow
+      }
+    }
   }
 
   /**
@@ -77,18 +138,19 @@ export class NotificationService {
     journeyName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const notifications = recipientIds.map((recipientId) =>
-      this.createNotification({
+    await this.fanOutNotifications(
+      'JOURNEY_STARTED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
         journeyId,
         recipientId,
         type: 'JOURNEY_STARTED',
         title: 'Journey Started',
         body: `The journey "${journeyName}" has begun!`,
-        data: { journeyId, journeyName },
+        data: { type: 'JOURNEY_STARTED', journeyId, journeyName },
       }),
     );
-
-    await Promise.all(notifications);
   }
 
   /**
@@ -99,18 +161,19 @@ export class NotificationService {
     journeyName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const notifications = recipientIds.map((recipientId) =>
-      this.createNotification({
+    await this.fanOutNotifications(
+      'JOURNEY_ENDED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
         journeyId,
         recipientId,
         type: 'JOURNEY_ENDED',
         title: 'Journey Completed',
         body: `The journey "${journeyName}" has ended`,
-        data: { journeyId, journeyName },
+        data: { type: 'JOURNEY_ENDED', journeyId, journeyName },
       }),
     );
-
-    await Promise.all(notifications);
   }
 
   /**
@@ -145,18 +208,24 @@ export class NotificationService {
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const notifications = recipientIds.map((recipientId) =>
-      this.createNotification({
+    await this.fanOutNotifications(
+      'PARTICIPANT_JOINED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
         journeyId,
         recipientId,
         type: 'PARTICIPANT_JOINED',
         title: 'Participant Joined',
         body: `${participantName} joined the journey`,
-        data: { journeyName, participantName },
+        data: {
+          type: 'PARTICIPANT_JOINED',
+          journeyId,
+          journeyName,
+          participantName,
+        },
       }),
     );
-
-    await Promise.all(notifications);
   }
 
   /**
@@ -168,18 +237,57 @@ export class NotificationService {
     participantName: string,
     recipientIds: string[],
   ): Promise<void> {
-    const notifications = recipientIds.map((recipientId) =>
-      this.createNotification({
+    await this.fanOutNotifications(
+      'ARRIVAL_DETECTED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
         journeyId,
         recipientId,
         type: 'ARRIVAL_DETECTED',
         title: 'Arrival Detected',
         body: `${participantName} has arrived at the destination`,
-        data: { journeyName, participantName },
+        data: {
+          type: 'ARRIVAL_DETECTED',
+          journeyId,
+          journeyName,
+          participantName,
+        },
+      }),
+    );
+  }
+
+  /**
+   * Send participant left notification (NOTIF-07)
+   */
+  async sendParticipantLeft(
+    journeyId: string,
+    journeyName: string,
+    participantName: string,
+    actorId: string,
+    recipientIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'PARTICIPANT_LEFT',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'PARTICIPANT_LEFT',
+        title: 'Participant Left',
+        body: `${participantName} has left the journey`,
+        data: {
+          type: 'PARTICIPANT_LEFT',
+          journeyId,
+          journeyName,
+          participantName,
+        },
       }),
     );
 
-    await Promise.all(notifications);
+    // actorId is kept in the signature for tracing context; recipient resolution
+    // has already excluded the actor before this method is called.
   }
 
   /**
@@ -306,6 +414,19 @@ export class NotificationService {
         this.logger.log(
           `FCM token registered successfully for user: ${userId}`,
         );
+
+        // Wire 0→1 token transition: send setup-confirmation push fire-and-forget
+        // (D-05/D-07). Count AFTER insert so the newly committed row is visible.
+        const tokenCount = await this.fcmTokenRepository.countForUser(userId);
+        if (tokenCount === 1) {
+          this.sendSetupConfirmationPush(userId).catch((err: Error) =>
+            this.logger.warn(
+              `Setup-confirmation push failed for user ${userId}: ${err.message}`,
+              'NotificationService',
+            ),
+          );
+        }
+
         return { message: 'FCM token registered successfully' };
       }
 
@@ -365,5 +486,20 @@ export class NotificationService {
    */
   async getUserFcmTokens(userId: string): Promise<string[]> {
     return this.fcmTokenRepository.getTokens(userId);
+  }
+
+  /**
+   * Send setup-confirmation push when a user registers their first FCM token
+   * (NOTIF-01, D-05/D-06). Calls fcmService.sendToUser directly — NEVER calls
+   * createNotification because notifications.journeyId is NOT NULL and there is
+   * no journey context for a setup-confirmation.
+   */
+  private async sendSetupConfirmationPush(userId: string): Promise<void> {
+    const tokens = await this.fcmTokenRepository.getTokens(userId);
+    await this.fcmService.sendToUser(tokens, {
+      title: 'Notifications enabled',
+      body: "You'll now receive updates for your journeys",
+      data: { type: 'SETUP_CONFIRMATION' },
+    });
   }
 }

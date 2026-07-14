@@ -7,6 +7,7 @@ import {
   ConflictException,
   InternalServerErrorException,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -373,23 +374,42 @@ export class AuthService {
         expiresIn: parseInt(expires_in),
       };
     } catch (error: unknown) {
-      if (
-        (error as { response?: { data?: { error?: { message?: string } } } })
-          .response?.data?.error
-      ) {
-        const firebaseError = (
-          error as { response: { data: { error: { message?: string } } } }
-        ).response.data.error;
+      const axiosError = error as {
+        response?: {
+          status?: number;
+          data?: { error?: { message?: string } };
+        };
+      };
+      const firebaseMessage = axiosError.response?.data?.error?.message;
 
-        if (
-          firebaseError.message === 'TOKEN_EXPIRED' ||
-          firebaseError.message === 'INVALID_REFRESH_TOKEN'
-        ) {
-          throw new UnauthorizedException(
-            'Refresh token expired or invalid. Please login again.',
-          );
-        }
+      // Definitive rejection: the refresh token itself is dead. Only THESE
+      // cases warrant clearing the session — the client will log the user out.
+      if (
+        firebaseMessage === 'TOKEN_EXPIRED' ||
+        firebaseMessage === 'INVALID_REFRESH_TOKEN' ||
+        firebaseMessage === 'USER_DISABLED' ||
+        firebaseMessage === 'USER_NOT_FOUND'
+      ) {
+        throw new UnauthorizedException(
+          'Refresh token expired or invalid. Please login again.',
+        );
       }
+
+      // Transient upstream failure — a network error reaching Firebase, a
+      // Firebase 5xx, or a response with no recognizable error body. This is
+      // NOT the user's fault and is recoverable, so surface 503 (not 401) so the
+      // client retries instead of destroying a still-valid session. This is the
+      // fix for spurious offline / mid-journey logouts: a brief blip must never
+      // sign the user out.
+      const upstreamStatus = axiosError.response?.status;
+      if (upstreamStatus === undefined || upstreamStatus >= 500) {
+        throw new ServiceUnavailableException(
+          'Auth service temporarily unavailable, please retry.',
+        );
+      }
+
+      // Any other 4xx we can't positively classify as recoverable — treat as an
+      // auth failure and require re-login (safer than looping on a bad token).
       throw new UnauthorizedException('Failed to refresh token');
     }
   }
