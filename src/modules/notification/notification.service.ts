@@ -180,7 +180,8 @@ export class NotificationService {
    * Send lag alert notification (D-01/D-02/D-03, D-09 envelope).
    * Notifies both the laggard (self-directed) and the rest of the active
    * group (third-person), additive on top of the pre-existing laggard-only
-   * behavior — never a substitution.
+   * behavior. The two legs are fault-isolated so either audience can still
+   * receive its notification when the other leg fails.
    */
   async sendLagAlert(
     journeyId: string,
@@ -194,32 +195,14 @@ export class NotificationService {
       severity === 'CRITICAL' ? 'Critical Lag Alert' : 'Lag Warning';
     const roundedDistance = Math.round(distance);
 
-    // Leg 1: laggard, self-directed (existing behavior, kept as-is)
-    await this.createNotification({
-      journeyId,
-      recipientId: laggardUserId,
-      type: 'LAG_ALERT',
-      title,
-      body: `You are ${roundedDistance}m behind the leader`,
-      data: {
-        type: 'LAG_ALERT',
+    const [laggardResult, groupResult] = await Promise.allSettled([
+      // Leg 1: laggard, self-directed.
+      this.createNotification({
         journeyId,
-        distance: distance.toString(),
-        severity,
-      },
-    });
-
-    // Leg 2: group, third-person (new)
-    await this.fanOutNotifications(
-      'LAG_ALERT',
-      journeyId,
-      groupRecipientIds,
-      (recipientId) => ({
-        journeyId,
-        recipientId,
+        recipientId: laggardUserId,
         type: 'LAG_ALERT',
         title,
-        body: `${laggardName} is ${roundedDistance}m behind`,
+        body: `You are ${roundedDistance}m behind the leader`,
         data: {
           type: 'LAG_ALERT',
           journeyId,
@@ -227,7 +210,39 @@ export class NotificationService {
           severity,
         },
       }),
-    );
+      // Leg 2: group, third-person.
+      this.fanOutNotifications(
+        'LAG_ALERT',
+        journeyId,
+        groupRecipientIds,
+        (recipientId) => ({
+          journeyId,
+          recipientId,
+          type: 'LAG_ALERT',
+          title,
+          body: `${laggardName} is ${roundedDistance}m behind`,
+          data: {
+            type: 'LAG_ALERT',
+            journeyId,
+            distance: distance.toString(),
+            severity,
+          },
+        }),
+      ),
+    ]);
+
+    if (laggardResult.status === 'rejected') {
+      this.logger.warn(
+        `Laggard lag-alert notification failed for journey ${journeyId}, user ${laggardUserId}: ${(laggardResult.reason as Error).message}`,
+        'NotificationService',
+      );
+    }
+    if (groupResult.status === 'rejected') {
+      this.logger.warn(
+        `Group lag-alert notification failed for journey ${journeyId}: ${(groupResult.reason as Error).message}`,
+        'NotificationService',
+      );
+    }
   }
 
   /**
