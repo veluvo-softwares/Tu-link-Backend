@@ -15,6 +15,7 @@ import { LagAlert } from '../../../shared/interfaces/notification.interface';
 import { LagSeverity } from '../../../types/notification.type';
 import { LatLng } from '../../../database/schema/columns/geography-point';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
+import { LoggerService } from '../../../shared/logger/logger.service';
 import { ParticipantRepository } from '../../../database/repositories/participant.repository';
 import { NotificationService } from '../../notification/notification.service';
 
@@ -44,6 +45,7 @@ export class LagDetectionService {
     private configService: ConfigService,
     private participantRepository: ParticipantRepository,
     private notificationService: NotificationService,
+    private logger: LoggerService,
   ) {}
 
   /**
@@ -100,8 +102,11 @@ export class LagDetectionService {
               followerUpdate.participantId,
               journey.lagThresholdMeters,
             )
-            .catch(() => {
-              /* best-effort, D-12 */
+            .catch((error: Error) => {
+              this.logger.warn(
+                `Convoy-joined notification failed for journey ${journey.id}, participant ${followerUpdate.participantId}: ${error.message}`,
+                'LagDetectionService',
+              );
             });
         }
       }

@@ -14,6 +14,7 @@ import {
 import { NotificationService } from '../../notification/notification.service';
 import { Journey } from '../../../shared/interfaces/journey.interface';
 import { LocationUpdate } from '../../../shared/interfaces/location.interface';
+import { LoggerService } from '../../../shared/logger/logger.service';
 
 /**
  * NOTIF-16 (+ NOTIF-10/NOTIF-11 regression guard) — LagDetectionService unit
@@ -41,6 +42,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   let notificationService: jest.Mocked<
     Pick<NotificationService, 'sendConvoyJoined'>
   >;
+  let logger: jest.Mocked<Pick<LoggerService, 'warn'>>;
 
   const JOURNEY_ID = 'journey-1';
   const FOLLOWER_ID = 'follower-1';
@@ -145,6 +147,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
             sendConvoyJoined: jest.fn().mockResolvedValue(undefined),
           },
         },
+        { provide: LoggerService, useValue: { warn: jest.fn() } },
       ],
     }).compile();
 
@@ -154,6 +157,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
     configService = module.get(ConfigService);
     participantRepository = module.get(ParticipantRepository);
     notificationService = module.get(NotificationService);
+    logger = module.get(LoggerService);
 
     redisService.getJourneyLeader.mockResolvedValue(LEADER_ID);
     redisService.getCachedLocation.mockResolvedValue({
@@ -209,6 +213,42 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
       JOURNEY_ID,
       FOLLOWER_ID,
       500,
+    );
+  });
+
+  it('does not notify when another update wins the atomic convergence race', async () => {
+    participantRepository.findOne.mockResolvedValue(
+      mockParticipantRecord({ convergedAt: null }),
+    );
+    participantRepository.setConvergedIfNotConverged.mockResolvedValue(null);
+
+    const result = await service.detectLag(nearFollowerUpdate, journey);
+
+    expect(result).toBeNull();
+    expect(
+      participantRepository.setConvergedIfNotConverged,
+    ).toHaveBeenCalledTimes(1);
+    expect(notificationService.sendConvoyJoined).not.toHaveBeenCalled();
+  });
+
+  it('logs a rejected convergence notification without failing detection', async () => {
+    participantRepository.findOne.mockResolvedValue(
+      mockParticipantRecord({ convergedAt: null }),
+    );
+    participantRepository.setConvergedIfNotConverged.mockResolvedValue(
+      mockParticipantRecord({ convergedAt: new Date() }),
+    );
+    notificationService.sendConvoyJoined.mockRejectedValue(
+      new Error('notification unavailable'),
+    );
+
+    const result = await service.detectLag(nearFollowerUpdate, journey);
+    await Promise.resolve();
+
+    expect(result).toBeNull();
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('notification unavailable'),
+      'LagDetectionService',
     );
   });
 
