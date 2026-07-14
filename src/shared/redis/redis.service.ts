@@ -3,7 +3,26 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { CachedLocation } from '../interfaces/location.interface';
 import { LoggerService } from '../logger/logger.service';
-import { LagSeverity } from '../../types/notification.type';
+import {
+  LagCooldownClaimResult,
+  LagSeverity,
+} from '../../types/notification.type';
+
+const CLAIM_LAG_ALERT_COOLDOWN_SCRIPT = `
+local currentSeverity = redis.call('GET', KEYS[1])
+
+if not currentSeverity then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+
+if currentSeverity == 'WARNING' and ARGV[1] == 'CRITICAL' then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+
+return 0
+`;
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -203,37 +222,42 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  // Lag alert cooldown (per-member-per-severity)
-  async getLagAlertCooldown(
-    journeyId: string,
-    userId: string,
-  ): Promise<LagSeverity | null> {
-    try {
-      const key = `lag:cooldown:${journeyId}:${userId}`;
-      return (await this.client.get(key)) as LagSeverity | null;
-    } catch (error) {
-      this.logger.warn(
-        `Failed to read lag cooldown for ${journeyId}/${userId}: ${(error as Error).message}`,
-        'RedisService',
-      );
-      return null;
-    }
-  }
-
-  async setLagAlertCooldown(
+  /**
+   * Atomically claims permission to send a lag alert.
+   *
+   * Redis executes Lua scripts serially, so overlapping location updates
+   * cannot both observe an absent cooldown. A WARNING-to-CRITICAL escalation
+   * replaces the active warning claim; every other active claim suppresses
+   * the new attempt. Redis failures are explicit and fail closed at callers.
+   */
+  async claimLagAlertCooldown(
     journeyId: string,
     userId: string,
     severity: LagSeverity,
     ttlSeconds: number,
-  ): Promise<void> {
+  ): Promise<LagCooldownClaimResult> {
     try {
       const key = `lag:cooldown:${journeyId}:${userId}`;
-      await this.client.setex(key, ttlSeconds, severity);
+      const result = await this.client.eval(
+        CLAIM_LAG_ALERT_COOLDOWN_SCRIPT,
+        1,
+        key,
+        severity,
+        ttlSeconds.toString(),
+      );
+      return Number(result) === 1 ? 'ACQUIRED' : 'SUPPRESSED';
     } catch (error) {
       this.logger.warn(
-        `Failed to write lag cooldown for ${journeyId}/${userId}: ${(error as Error).message}`,
+        `Lag cooldown unavailable for ${journeyId}/${userId}: ${(error as Error).message}`,
         'RedisService',
+        {
+          event: 'lag_cooldown_unavailable',
+          journeyId,
+          userId,
+          severity,
+        },
       );
+      return 'UNAVAILABLE';
     }
   }
 

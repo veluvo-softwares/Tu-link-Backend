@@ -9,3 +9,5 @@ export type NotificationType =
   | 'CONVOY_JOINED';
 
 export type LagSeverity = 'WARNING' | 'CRITICAL';
+
+export type LagCooldownClaimResult = 'ACQUIRED' | 'SUPPRESSED' | 'UNAVAILABLE';
