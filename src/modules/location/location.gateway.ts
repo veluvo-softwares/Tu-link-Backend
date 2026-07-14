@@ -415,30 +415,25 @@ export class LocationGateway
           const laggardUserId = result.lagAlert.participantId;
           const severity = result.lagAlert.severity as LagSeverity;
 
-          const lastSeverity = await this.redisService.getLagAlertCooldown(
+          const ttlSeconds =
+            severity === 'CRITICAL'
+              ? (this.configService.get<number>(
+                  'app.lagCooldownCriticalSeconds',
+                ) ?? 120)
+              : (this.configService.get<number>(
+                  'app.lagCooldownWarningSeconds',
+                ) ?? 300);
+          const cooldownClaim = await this.redisService.claimLagAlertCooldown(
             payload.journeyId,
             laggardUserId,
+            severity,
+            ttlSeconds,
           );
-          const isEscalation =
-            lastSeverity === 'WARNING' && severity === 'CRITICAL';
-          const inCooldown = lastSeverity !== null && !isEscalation;
 
-          if (!inCooldown) {
-            const ttlSeconds =
-              severity === 'CRITICAL'
-                ? (this.configService.get<number>(
-                    'app.lagCooldownCriticalSeconds',
-                  ) ?? 120)
-                : (this.configService.get<number>(
-                    'app.lagCooldownWarningSeconds',
-                  ) ?? 300);
-            await this.redisService.setLagAlertCooldown(
-              payload.journeyId,
-              laggardUserId,
-              severity,
-              ttlSeconds,
-            );
-
+          // The claim is attempt-based: once acquired, failures are logged but
+          // do not release it and risk a notification storm. If Redis is down,
+          // fail closed for push/feed while the raw WS event above continues.
+          if (cooldownClaim === 'ACQUIRED') {
             const participants =
               await this.participantService.getJourneyParticipants(
                 payload.journeyId,
@@ -461,6 +456,11 @@ export class LocationGateway
               result.lagAlert.distanceFromLeader,
               severity,
               groupRecipientIds,
+            );
+          } else if (cooldownClaim === 'UNAVAILABLE') {
+            this.logger.warn(
+              `Lag notification suppressed because cooldown is unavailable for journey ${payload.journeyId}`,
+              'LocationGateway',
             );
           }
         } catch (err) {
