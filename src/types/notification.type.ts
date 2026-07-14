@@ -5,6 +5,7 @@ export type NotificationType =
   | 'LAG_ALERT'
   | 'PARTICIPANT_JOINED'
   | 'PARTICIPANT_LEFT'
-  | 'ARRIVAL_DETECTED';
+  | 'ARRIVAL_DETECTED'
+  | 'CONVOY_JOINED';
 
 export type LagSeverity = 'WARNING' | 'CRITICAL';

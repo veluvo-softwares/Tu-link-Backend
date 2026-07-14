@@ -16,6 +16,7 @@ export class CreateNotificationDto {
     'PARTICIPANT_JOINED',
     'PARTICIPANT_LEFT',
     'ARRIVAL_DETECTED',
+    'CONVOY_JOINED',
   ])
   type: NotificationType;
 

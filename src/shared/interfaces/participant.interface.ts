@@ -15,6 +15,7 @@ export interface Participant {
   invitedBy?: string;
   lastSeenAt?: Date;
   arrivedAt?: Date;
+  convergedAt?: Date;
   connectionStatus: ConnectionStatus;
   displayName?: string;
   deviceInfo?: {

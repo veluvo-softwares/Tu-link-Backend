@@ -51,6 +51,7 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'PARTICIPANT_JOINED',
   'PARTICIPANT_LEFT',
   'ARRIVAL_DETECTED',
+  'CONVOY_JOINED',
 ]);
 
 // src/types/notification.type.ts (LagSeverity)

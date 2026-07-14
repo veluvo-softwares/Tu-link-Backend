@@ -41,6 +41,7 @@ export const participants = pgTable(
     leftAt: timestamp('left_at', { withTimezone: true }),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true }),
     arrivedAt: timestamp('arrived_at', { withTimezone: true }),
+    convergedAt: timestamp('converged_at', { withTimezone: true }),
     deviceInfo: jsonb('device_info').$type<ParticipantDeviceInfo>(),
   },
   (t) => [

@@ -16,6 +16,18 @@ export default registerAs('app', () => ({
   ),
   warningLagMeters: parseInt(process.env.WARNING_LAG_METERS || '500', 10),
   criticalLagMeters: parseInt(process.env.CRITICAL_LAG_METERS || '1000', 10),
+  rendezvousRadiusMeters: parseInt(
+    process.env.RENDEZVOUS_RADIUS_METERS || '300',
+    10,
+  ),
+  lagCooldownWarningSeconds: parseInt(
+    process.env.LAG_COOLDOWN_WARNING_SECONDS || '300',
+    10,
+  ),
+  lagCooldownCriticalSeconds: parseInt(
+    process.env.LAG_COOLDOWN_CRITICAL_SECONDS || '120',
+    10,
+  ),
   arrivalDistanceThresholdMeters: parseInt(
     process.env.ARRIVAL_DISTANCE_THRESHOLD_METERS || '100',
     10,
