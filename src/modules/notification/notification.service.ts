@@ -177,25 +177,82 @@ export class NotificationService {
   }
 
   /**
-   * Send lag alert notification
+   * Send lag alert notification (D-01/D-02/D-03, D-09 envelope).
+   * Notifies both the laggard (self-directed) and the rest of the active
+   * group (third-person), additive on top of the pre-existing laggard-only
+   * behavior — never a substitution.
    */
   async sendLagAlert(
     journeyId: string,
-    userId: string,
+    laggardUserId: string,
+    laggardName: string,
     distance: number,
     severity: 'WARNING' | 'CRITICAL',
+    groupRecipientIds: string[],
   ): Promise<void> {
     const title =
       severity === 'CRITICAL' ? 'Critical Lag Alert' : 'Lag Warning';
-    const body = `You are ${Math.round(distance)}m behind the leader`;
+    const roundedDistance = Math.round(distance);
 
+    // Leg 1: laggard, self-directed (existing behavior, kept as-is)
+    await this.createNotification({
+      journeyId,
+      recipientId: laggardUserId,
+      type: 'LAG_ALERT',
+      title,
+      body: `You are ${roundedDistance}m behind the leader`,
+      data: {
+        type: 'LAG_ALERT',
+        journeyId,
+        distance: distance.toString(),
+        severity,
+      },
+    });
+
+    // Leg 2: group, third-person (new)
+    await this.fanOutNotifications(
+      'LAG_ALERT',
+      journeyId,
+      groupRecipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'LAG_ALERT',
+        title,
+        body: `${laggardName} is ${roundedDistance}m behind`,
+        data: {
+          type: 'LAG_ALERT',
+          journeyId,
+          distance: distance.toString(),
+          severity,
+        },
+      }),
+    );
+  }
+
+  /**
+   * Send convergence notification (D-07/D-08). Persisted to the in-app feed
+   * via createNotification — unlike sendSetupConfirmationPush, which is
+   * deliberately ephemeral/push-only. Convergence is journey-scoped and
+   * one-shot per journey, so it has history value; setup-confirmation is
+   * app-level and re-fires on re-registration, so it does not.
+   */
+  async sendConvoyJoined(
+    journeyId: string,
+    userId: string,
+    lagThresholdMeters: number,
+  ): Promise<void> {
     await this.createNotification({
       journeyId,
       recipientId: userId,
-      type: 'LAG_ALERT',
-      title,
-      body,
-      data: { distance: distance.toString(), severity },
+      type: 'CONVOY_JOINED',
+      title: "You've joined the convoy",
+      body: `You'll be alerted if you fall more than ${lagThresholdMeters}m behind.`,
+      data: {
+        type: 'CONVOY_JOINED',
+        journeyId,
+        lagThresholdMeters: lagThresholdMeters.toString(),
+      },
     });
   }
 
