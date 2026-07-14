@@ -15,6 +15,8 @@ import { LagAlert } from '../../../shared/interfaces/notification.interface';
 import { LagSeverity } from '../../../types/notification.type';
 import { LatLng } from '../../../database/schema/columns/geography-point';
 import { DistanceUtils } from '../../../common/utils/distance.utils';
+import { ParticipantRepository } from '../../../database/repositories/participant.repository';
+import { NotificationService } from '../../notification/notification.service';
 
 // Maps the repository row to the API LagAlert shape (the row carries
 // `Date | null` for the resolved/acknowledged timestamps; the interface uses
@@ -40,6 +42,8 @@ export class LagDetectionService {
     private redisService: RedisService,
     private mapsService: MapsService,
     private configService: ConfigService,
+    private participantRepository: ParticipantRepository,
+    private notificationService: NotificationService,
   ) {}
 
   /**
@@ -72,6 +76,37 @@ export class LagDetectionService {
       followerUpdate.location,
       leaderCoords,
     );
+
+    // Convergence gate (D-04/D-06/D-07, NOTIF-16): skip all lag evaluation
+    // for a participant who has never joined the group. Reuses the distance
+    // already computed above — no second Haversine call needed.
+    const participant = await this.participantRepository.findOne(
+      journey.id,
+      followerUpdate.participantId,
+    );
+    if (!participant?.convergedAt) {
+      const rendezvousRadius =
+        this.configService.get<number>('app.rendezvousRadiusMeters') ?? 300;
+      if (distance <= rendezvousRadius) {
+        const updated =
+          await this.participantRepository.setConvergedIfNotConverged(
+            journey.id,
+            followerUpdate.participantId,
+          );
+        if (updated) {
+          this.notificationService
+            .sendConvoyJoined(
+              journey.id,
+              followerUpdate.participantId,
+              journey.lagThresholdMeters,
+            )
+            .catch(() => {
+              /* best-effort, D-12 */
+            });
+        }
+      }
+      return null;
+    }
 
     // Check if distance exceeds threshold
     if (distance > journey.lagThresholdMeters) {
