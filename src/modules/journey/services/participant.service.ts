@@ -137,7 +137,11 @@ export class ParticipantService {
       userId,
     );
     if (!participant) return false;
-    return participant.status === 'ACTIVE' || participant.status === 'ACCEPTED';
+    // ARRIVED members remain part of an ACTIVE journey until the whole convoy
+    // completes. Their clients keep sending stationary beacons so peers can
+    // see them at the destination; rejecting those updates creates an error
+    // storm and corrupts journey health metrics.
+    return ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(participant.status);
   }
 
   async updateConnectionStatus(
