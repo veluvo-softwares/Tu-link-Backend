@@ -12,6 +12,7 @@ import { UsersRepository } from '../../database/repositories/users.repository';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { Participant } from '../../shared/interfaces/participant.interface';
+import { LagSeverity } from '../../types/notification.type';
 
 @Injectable()
 export class NotificationService {
@@ -188,14 +189,14 @@ export class NotificationService {
     laggardUserId: string,
     laggardName: string,
     distance: number,
-    severity: 'WARNING' | 'CRITICAL',
+    severity: LagSeverity,
     groupRecipientIds: string[],
   ): Promise<void> {
     const title =
       severity === 'CRITICAL' ? 'Critical Lag Alert' : 'Lag Warning';
     const roundedDistance = Math.round(distance);
 
-    const [laggardResult, groupResult] = await Promise.allSettled([
+    const [laggardResult] = await Promise.allSettled([
       // Leg 1: laggard, self-directed.
       this.createNotification({
         journeyId,
@@ -234,12 +235,6 @@ export class NotificationService {
     if (laggardResult.status === 'rejected') {
       this.logger.warn(
         `Laggard lag-alert notification failed for journey ${journeyId}, user ${laggardUserId}: ${(laggardResult.reason as Error).message}`,
-        'NotificationService',
-      );
-    }
-    if (groupResult.status === 'rejected') {
-      this.logger.warn(
-        `Group lag-alert notification failed for journey ${journeyId}: ${(groupResult.reason as Error).message}`,
         'NotificationService',
       );
     }

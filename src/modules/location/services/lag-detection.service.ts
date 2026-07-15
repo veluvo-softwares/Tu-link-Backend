@@ -54,6 +54,7 @@ export class LagDetectionService {
   async detectLag(
     followerUpdate: LocationUpdate,
     journey: Journey,
+    participant: { convergedAt?: Date | null },
   ): Promise<LagAlert | null> {
     // Get leader's latest location from Redis cache
     const leaderId = await this.redisService.getJourneyLeader(journey.id);
@@ -82,11 +83,7 @@ export class LagDetectionService {
     // Convergence gate (D-04/D-06/D-07, NOTIF-16): skip all lag evaluation
     // for a participant who has never joined the group. Reuses the distance
     // already computed above — no second Haversine call needed.
-    const participant = await this.participantRepository.findOne(
-      journey.id,
-      followerUpdate.participantId,
-    );
-    if (!participant?.convergedAt) {
+    if (!participant.convergedAt) {
       const rendezvousRadius =
         this.configService.get<number>('app.rendezvousRadiusMeters') ?? 300;
       if (distance <= rendezvousRadius) {

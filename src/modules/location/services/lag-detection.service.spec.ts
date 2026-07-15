@@ -37,7 +37,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   >;
   let configService: jest.Mocked<Pick<ConfigService, 'get'>>;
   let participantRepository: jest.Mocked<
-    Pick<ParticipantRepository, 'findOne' | 'setConvergedIfNotConverged'>
+    Pick<ParticipantRepository, 'setConvergedIfNotConverged'>
   >;
   let notificationService: jest.Mocked<
     Pick<NotificationService, 'sendConvoyJoined'>
@@ -137,7 +137,6 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
         {
           provide: ParticipantRepository,
           useValue: {
-            findOne: jest.fn(),
             setConvergedIfNotConverged: jest.fn(),
           },
         },
@@ -175,11 +174,13 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('not-yet-converged, beyond rendezvous radius: no lag alert, no notification', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: null }),
-    );
+    const participant = mockParticipantRecord({ convergedAt: null });
 
-    const result = await service.detectLag(farFollowerUpdate, journey);
+    const result = await service.detectLag(
+      farFollowerUpdate,
+      journey,
+      participant,
+    );
 
     expect(result).toBeNull();
     expect(
@@ -192,14 +193,16 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('not-yet-converged, crosses rendezvous radius: converges and notifies exactly once', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: null }),
-    );
+    const participant = mockParticipantRecord({ convergedAt: null });
     participantRepository.setConvergedIfNotConverged.mockResolvedValue(
       mockParticipantRecord({ convergedAt: new Date() }),
     );
 
-    const result = await service.detectLag(nearFollowerUpdate, journey);
+    const result = await service.detectLag(
+      nearFollowerUpdate,
+      journey,
+      participant,
+    );
 
     expect(result).toBeNull();
     expect(
@@ -217,12 +220,14 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('does not notify when another update wins the atomic convergence race', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: null }),
-    );
+    const participant = mockParticipantRecord({ convergedAt: null });
     participantRepository.setConvergedIfNotConverged.mockResolvedValue(null);
 
-    const result = await service.detectLag(nearFollowerUpdate, journey);
+    const result = await service.detectLag(
+      nearFollowerUpdate,
+      journey,
+      participant,
+    );
 
     expect(result).toBeNull();
     expect(
@@ -232,9 +237,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('logs a rejected convergence notification without failing detection', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: null }),
-    );
+    const participant = mockParticipantRecord({ convergedAt: null });
     participantRepository.setConvergedIfNotConverged.mockResolvedValue(
       mockParticipantRecord({ convergedAt: new Date() }),
     );
@@ -242,7 +245,11 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
       new Error('notification unavailable'),
     );
 
-    const result = await service.detectLag(nearFollowerUpdate, journey);
+    const result = await service.detectLag(
+      nearFollowerUpdate,
+      journey,
+      participant,
+    );
     await Promise.resolve();
 
     expect(result).toBeNull();
@@ -253,14 +260,18 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('already converged, beyond threshold: creates a lag alert (regression guard)', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: new Date('2024-01-01') }),
-    );
+    const participant = mockParticipantRecord({
+      convergedAt: new Date('2024-01-01'),
+    });
     lagAlertRepository.upsertActiveForParticipant.mockResolvedValue(
       mockLagAlertRecord({}),
     );
 
-    const result = await service.detectLag(farFollowerUpdate, journey);
+    const result = await service.detectLag(
+      farFollowerUpdate,
+      journey,
+      participant,
+    );
 
     expect(result).not.toBeNull();
     expect(lagAlertRepository.upsertActiveForParticipant).toHaveBeenCalledTimes(
@@ -270,11 +281,15 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
   });
 
   it('already converged, within threshold: resolves active alerts, no new alert (regression guard)', async () => {
-    participantRepository.findOne.mockResolvedValue(
-      mockParticipantRecord({ convergedAt: new Date('2024-01-01') }),
-    );
+    const participant = mockParticipantRecord({
+      convergedAt: new Date('2024-01-01'),
+    });
 
-    const result = await service.detectLag(nearFollowerUpdate, journey);
+    const result = await service.detectLag(
+      nearFollowerUpdate,
+      journey,
+      participant,
+    );
 
     expect(result).toBeNull();
     expect(

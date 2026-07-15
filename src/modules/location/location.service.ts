@@ -189,6 +189,7 @@ export class LocationService {
       lagAlert = await this.lagDetectionService.detectLag(
         locationUpdate,
         journey,
+        participant,
       );
     }
 

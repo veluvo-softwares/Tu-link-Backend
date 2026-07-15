@@ -7,7 +7,7 @@ import { RedisService } from '../../shared/redis/redis.service';
 import { NotificationService } from './notification.service';
 import { FcmService } from './services/fcm.service';
 
-describe('NotificationService.sendLagAlert', () => {
+describe('NotificationService notifications', () => {
   let service: NotificationService;
   let logger: jest.Mocked<Pick<LoggerService, 'warn'>>;
 
@@ -94,5 +94,24 @@ describe('NotificationService.sendLagAlert', () => {
       expect.stringContaining('Laggard lag-alert notification failed'),
       'NotificationService',
     );
+  });
+
+  it('persists the convoy-joined notification contract', async () => {
+    const createNotification = jest.spyOn(service, 'createNotification');
+
+    await service.sendConvoyJoined(journeyId, laggardUserId, 500);
+
+    expect(createNotification).toHaveBeenCalledWith({
+      journeyId,
+      recipientId: laggardUserId,
+      type: 'CONVOY_JOINED',
+      title: "You've joined the convoy",
+      body: "You'll be alerted if you fall more than 500m behind.",
+      data: {
+        type: 'CONVOY_JOINED',
+        journeyId,
+        lagThresholdMeters: '500',
+      },
+    });
   });
 });

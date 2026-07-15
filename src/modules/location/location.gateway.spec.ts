@@ -42,6 +42,7 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     >
   >;
   let redisService: jest.Mocked<Pick<RedisService, 'claimLagAlertCooldown'>>;
+  let logger: jest.Mocked<Pick<LoggerService, 'warn'>>;
   let emitMock: jest.Mock;
 
   const JOURNEY_ID = 'journey-123';
@@ -177,6 +178,7 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     locationService = module.get(LocationService);
     notificationService = module.get(NotificationService);
     redisService = module.get(RedisService);
+    logger = module.get(LoggerService);
 
     // Mock the socket.io server so broadcast chains do not throw.
     const emit = jest.fn();
@@ -411,6 +413,10 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
       expect(emitMock).toHaveBeenCalledWith(
         'lag-alert',
         expect.objectContaining({ severity: 'WARNING' }),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('cooldown is unavailable'),
+        'LocationGateway',
       );
     });
   });
