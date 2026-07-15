@@ -163,8 +163,28 @@ export class ParticipantRepository {
     return row ? toRecord(row) : null;
   }
 
+  private async transition(
+    journeyId: string,
+    userId: string,
+    from: ParticipantStatus[],
+    set: Record<string, unknown>,
+  ): Promise<ParticipantRecord | null> {
+    const [row] = await this.db
+      .update(participants)
+      .set(set)
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          eq(participants.userId, userId),
+          inArray(participants.status, from),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
   accept(journeyId: string, userId: string): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
+    return this.transition(journeyId, userId, ['INVITED'], {
       status: 'ACCEPTED',
       joinedAt: sql`now()`,
     });
@@ -175,7 +195,7 @@ export class ParticipantRepository {
     journeyId: string,
     userId: string,
   ): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
+    return this.transition(journeyId, userId, ['INVITED'], {
       status: 'ACTIVE',
       joinedAt: sql`now()`,
     });
@@ -185,14 +205,22 @@ export class ParticipantRepository {
     journeyId: string,
     userId: string,
   ): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, { status: 'DECLINED' });
+    return this.transition(journeyId, userId, ['INVITED'], {
+      status: 'DECLINED',
+    });
   }
 
   leave(journeyId: string, userId: string): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
-      status: 'LEFT',
-      leftAt: sql`now()`,
-    });
+    return this.transition(
+      journeyId,
+      userId,
+      ['ACCEPTED', 'ACTIVE', 'ARRIVED'],
+      {
+        status: 'LEFT',
+        leftAt: sql`now()`,
+        connectionStatus: 'DISCONNECTED',
+      },
+    );
   }
 
   markArrived(
@@ -275,6 +303,22 @@ export class ParticipantRepository {
             eq(participants.status, 'ACCEPTED'),
             eq(participants.role, 'LEADER'),
           ),
+        ),
+      );
+  }
+
+  async releaseJoinedMemberships(journeyId: string): Promise<void> {
+    await this.db
+      .update(participants)
+      .set({
+        status: 'LEFT',
+        leftAt: sql`now()`,
+        connectionStatus: 'DISCONNECTED',
+      })
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          inArray(participants.status, ['ACCEPTED', 'ACTIVE', 'ARRIVED']),
         ),
       );
   }

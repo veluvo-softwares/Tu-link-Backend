@@ -46,6 +46,7 @@ export class JourneyController {
   @ApiResponse({ status: 201, description: 'Journey created successfully' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
   async create(
     @CurrentUser('uid') userId: string,
     @Body() createJourneyDto: CreateJourneyDto,
@@ -54,10 +55,10 @@ export class JourneyController {
   }
 
   @Get('active')
-  @ApiOperation({ summary: 'Get user active journeys' })
+  @ApiOperation({ summary: 'Get user pending or active journeys' })
   @ApiResponse({
     status: 200,
-    description: 'Active journeys retrieved successfully',
+    description: 'Pending or active journeys retrieved successfully',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getActiveJourneys(@CurrentUser('uid') userId: string) {
@@ -228,6 +229,7 @@ export class JourneyController {
   })
   @ApiResponse({ status: 200, description: 'Invitation accepted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
   @ApiResponse({
     status: 404,
     description: 'Journey not found OR Invitation not found',
@@ -260,7 +262,7 @@ export class JourneyController {
   @ApiOperation({
     summary: 'Leave journey',
     description:
-      'Leave an active journey. Changes participant status to LEFT. Cannot leave if you are the leader.',
+      'Leave a pending or active journey. Changes participant status to LEFT. Cannot leave if you are the leader.',
   })
   @ApiResponse({ status: 200, description: 'Left journey successfully' })
   @ApiResponse({

@@ -41,24 +41,44 @@ export class JourneyService {
     userId: string,
     createJourneyDto: CreateJourneyDto,
   ): Promise<Journey> {
-    const journey = await this.journeyRepository.create({
-      name: createJourneyDto.name,
-      leaderId: userId,
-      destination: createJourneyDto.destination,
-      destinationAddress: createJourneyDto.destinationAddress,
-      lagThresholdMeters:
-        createJourneyDto.lagThresholdMeters ||
-        this.configService.get<number>('app.defaultLagThresholdMeters') ||
-        500,
-    });
+    await this.assertNoOtherOpenJourney(userId);
+
+    let journey: Awaited<ReturnType<JourneyRepository['create']>>;
+    try {
+      journey = await this.journeyRepository.create({
+        name: createJourneyDto.name,
+        leaderId: userId,
+        destination: createJourneyDto.destination,
+        destinationAddress: createJourneyDto.destinationAddress,
+        lagThresholdMeters:
+          createJourneyDto.lagThresholdMeters ||
+          this.configService.get<number>('app.defaultLagThresholdMeters') ||
+          500,
+      });
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.openJourneyConflict();
+      }
+      throw error;
+    }
 
     // Add creator as leader participant
-    await this.participantService.addParticipant(
-      journey.id,
-      userId,
-      userId,
-      'LEADER',
-    );
+    try {
+      await this.participantService.addParticipant(
+        journey.id,
+        userId,
+        userId,
+        'LEADER',
+      );
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        await this.journeyRepository.updateStatus(journey.id, 'CANCELLED', {
+          setEndTime: true,
+        });
+        throw this.openJourneyConflict();
+      }
+      throw error;
+    }
 
     return journey as unknown as Journey;
   }
@@ -80,6 +100,11 @@ export class JourneyService {
    * a best-effort PARTICIPANT_LEFT notification (NOTIF-07, D-12).
    */
   async leaveJourney(journeyId: string, userId: string): Promise<void> {
+    const journey = await this.findById(journeyId);
+    if (journey.status !== 'PENDING' && journey.status !== 'ACTIVE') {
+      throw new BadRequestException('This journey can no longer be left');
+    }
+
     // a. Fetch participants with displayNames BEFORE the leave so the actor is
     //    still present and their displayName can be resolved (RESEARCH.md Pitfall 5).
     const participants =
@@ -102,7 +127,6 @@ export class JourneyService {
 
     // e. Best-effort notification — mirrors start() post-commit block (D-12).
     try {
-      const journey = await this.findById(journeyId);
       await this.notificationService.sendParticipantLeft(
         journeyId,
         journey.name,
@@ -153,13 +177,48 @@ export class JourneyService {
       throw new ForbiddenException('Only leader can delete journey');
     }
 
-    if (journey.status === 'ACTIVE') {
-      throw new BadRequestException('Cannot delete active journey');
+    if (journey.status !== 'PENDING') {
+      throw new BadRequestException('Only pending journeys can be cancelled');
     }
+
+    const participants =
+      await this.participantService.getJourneyParticipants(journeyId);
+    const recipientIds = participants
+      .filter(
+        (participant) =>
+          participant.userId !== userId &&
+          ['INVITED', 'ACCEPTED', 'ACTIVE', 'ARRIVED'].includes(
+            participant.status,
+          ),
+      )
+      .map((participant) => participant.userId);
 
     await this.journeyRepository.updateStatus(journeyId, 'CANCELLED', {
       setEndTime: true,
     });
+    await this.participantService.releaseJoinedMemberships(journeyId);
+
+    try {
+      await Promise.all([
+        this.notificationService.sendJourneyCancelled(
+          journeyId,
+          journey.name,
+          recipientIds,
+        ),
+        this.locationGateway.broadcastJourneyEnded(journeyId, {
+          ...journey,
+          status: 'CANCELLED',
+          participants,
+        }),
+      ]);
+    } catch (error) {
+      this.logger.error(
+        `Post-cancellation feedback failed for journey ${journeyId}`,
+        error instanceof Error ? error.stack : undefined,
+        'JourneyService',
+        { journeyId, leaderId: userId },
+      );
+    }
 
     // Clean up all Redis keys for this journey
     // Participant keys must be cleared before clearJourneyCache() removes the
@@ -402,6 +461,8 @@ export class JourneyService {
       )
       .map((p) => p.userId);
 
+    await this.participantService.releaseJoinedMemberships(journeyId);
+
     const journey = await this.findById(journeyId);
 
     await this.notificationService.sendJourneyEnded(
@@ -422,6 +483,14 @@ export class JourneyService {
   async acceptInvitation(journeyId: string, userId: string): Promise<void> {
     const journey = await this.findById(journeyId);
 
+    const invitation = await this.participantService.getParticipant(
+      journeyId,
+      userId,
+    );
+    if (!invitation || invitation.status !== 'INVITED') {
+      throw new NotFoundException('Invitation not found');
+    }
+
     // Can't join a journey that has already ended or been cancelled.
     if (journey.status === 'COMPLETED' || journey.status === 'CANCELLED') {
       throw new BadRequestException(
@@ -429,15 +498,24 @@ export class JourneyService {
       );
     }
 
-    if (journey.status === 'ACTIVE') {
-      // Journey already started — promote directly to ACTIVE so the user can
-      // immediately join the WebSocket room and send location updates.
-      await this.participantService.markActive(journeyId, userId);
+    await this.assertNoOtherOpenJourney(userId, journeyId);
 
-      // Add to the Redis participants set so they appear in live snapshot queries.
-      await this.redisService.addJourneyParticipant(journeyId, userId);
-    } else {
-      await this.participantService.acceptInvitation(journeyId, userId);
+    try {
+      if (journey.status === 'ACTIVE') {
+        // Journey already started — promote directly to ACTIVE so the user can
+        // immediately join the WebSocket room and send location updates.
+        await this.participantService.markActive(journeyId, userId);
+
+        // Add to the Redis participants set so they appear in live snapshot queries.
+        await this.redisService.addJourneyParticipant(journeyId, userId);
+      } else {
+        await this.participantService.acceptInvitation(journeyId, userId);
+      }
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        throw this.openJourneyConflict();
+      }
+      throw error;
     }
 
     const user = await this.usersRepository.findById(userId);
@@ -629,7 +707,7 @@ export class JourneyService {
   async getUserActiveJourneys(userId: string): Promise<Journey[]> {
     const participations = await this.participantService.getUserParticipations(
       userId,
-      ['ACTIVE', 'ACCEPTED'],
+      ['ACTIVE', 'ACCEPTED', 'ARRIVED'],
     );
 
     const journeyIds = new Set(participations.map((p) => p.journeyId));
@@ -637,12 +715,44 @@ export class JourneyService {
 
     for (const journeyId of journeyIds) {
       const journey = await this.findById(journeyId);
-      if (journey.status === 'ACTIVE') {
+      if (journey.status === 'PENDING' || journey.status === 'ACTIVE') {
         journeys.push(journey);
       }
     }
 
     return journeys;
+  }
+
+  private async assertNoOtherOpenJourney(
+    userId: string,
+    excludedJourneyId?: string,
+  ): Promise<void> {
+    const openJourneys = await this.getUserActiveJourneys(userId);
+    const conflict = openJourneys.find(
+      (journey) => journey.id !== excludedJourneyId,
+    );
+    if (conflict) {
+      throw this.openJourneyConflict(conflict.id, conflict.status);
+    }
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    return (
+      (error as { code?: string }).code === '23505' ||
+      (error as { cause?: { code?: string } }).cause?.code === '23505'
+    );
+  }
+
+  private openJourneyConflict(
+    journeyId?: string,
+    journeyStatus?: string,
+  ): ConflictException {
+    return new ConflictException({
+      message: 'You are already in another journey',
+      error: 'ALREADY_IN_JOURNEY',
+      ...(journeyId ? { journeyId } : {}),
+      ...(journeyStatus ? { journeyStatus } : {}),
+    });
   }
 
   async getUserJourneyHistory(userId: string): Promise<Journey[]> {

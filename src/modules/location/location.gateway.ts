@@ -825,6 +825,8 @@ export class LocationGateway
   async broadcastJourneyEnded(journeyId: string, journey: any) {
     this.server.to(`journey:${journeyId}`).emit('journey-ended', {
       journey,
+      reason: journey?.status === 'CANCELLED' ? 'cancelled' : 'completed',
+      endedAt: new Date().toISOString(),
       timestamp: Date.now(),
     });
   }

@@ -64,7 +64,10 @@ export class ParticipantService {
       throw new ForbiddenException('Leader cannot leave journey');
     }
 
-    await this.participantRepository.leave(journeyId, userId);
+    const updated = await this.participantRepository.leave(journeyId, userId);
+    if (!updated) {
+      throw new NotFoundException('Active journey membership not found');
+    }
 
     // Remove from Redis
     await this.redisService.removeJourneyParticipant(journeyId, userId);
@@ -114,6 +117,10 @@ export class ParticipantService {
   // journey.start(): bulk-promote ACCEPTED participants + the leader to ACTIVE.
   async activateForStart(journeyId: string): Promise<void> {
     await this.participantRepository.activateForStart(journeyId);
+  }
+
+  async releaseJoinedMemberships(journeyId: string): Promise<void> {
+    await this.participantRepository.releaseJoinedMemberships(journeyId);
   }
 
   async isParticipant(journeyId: string, userId: string): Promise<boolean> {

@@ -44,8 +44,8 @@ export const journeys = pgTable(
     index('idx_journeys_leader').on(t.leaderId),
     index('idx_journeys_status').on(t.status),
     index('idx_journeys_dest').using('gist', t.destination),
-    uniqueIndex('idx_journeys_one_active_per_leader')
+    uniqueIndex('idx_journeys_one_open_per_leader')
       .on(t.leaderId)
-      .where(sql`status = 'ACTIVE'`),
+      .where(sql`status IN ('PENDING', 'ACTIVE')`),
   ],
 );

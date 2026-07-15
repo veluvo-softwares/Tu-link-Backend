@@ -5,8 +5,10 @@ import {
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import {
   connectionStatusEnum,
   participantRoleEnum,
@@ -48,5 +50,8 @@ export const participants = pgTable(
     primaryKey({ columns: [t.journeyId, t.userId] }),
     // replaces collectionGroup('participants').where('userId','==',u)
     index('idx_participants_user').on(t.userId, t.status),
+    uniqueIndex('idx_participants_one_open_membership')
+      .on(t.userId)
+      .where(sql`status IN ('ACCEPTED', 'ACTIVE', 'ARRIVED')`),
   ],
 );
