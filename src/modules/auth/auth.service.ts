@@ -662,7 +662,12 @@ export class AuthService {
         };
       } else {
         // Fallback: log the link if email service fails
-        console.log(`Email service failed. Verification link: ${link}`);
+        // Never log the generated verification URL: it contains a one-time
+        // oobCode that can be used to verify the account. The recipient and
+        // upstream error logs provide enough correlation for diagnostics.
+        console.warn(
+          `Email service failed for user ${userRecord.uid}; verification link was not logged`,
+        );
         return {
           success: true,
           message: 'Email verification initiated (check server logs for link)',
