@@ -3,6 +3,26 @@ import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
 import { CachedLocation } from '../interfaces/location.interface';
 import { LoggerService } from '../logger/logger.service';
+import {
+  LagCooldownClaimResult,
+  LagSeverity,
+} from '../../types/notification.type';
+
+const CLAIM_LAG_ALERT_COOLDOWN_SCRIPT = `
+local currentSeverity = redis.call('GET', KEYS[1])
+
+if not currentSeverity then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+
+if currentSeverity == 'WARNING' and ARGV[1] == 'CRITICAL' then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return 1
+end
+
+return 0
+`;
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
@@ -199,6 +219,45 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
         `Failed to invalidate revocation cache for uid ${uid}: ${(error as Error).message}`,
         'RedisService',
       );
+    }
+  }
+
+  /**
+   * Atomically claims permission to send a lag alert.
+   *
+   * Redis executes Lua scripts serially, so overlapping location updates
+   * cannot both observe an absent cooldown. A WARNING-to-CRITICAL escalation
+   * replaces the active warning claim; every other active claim suppresses
+   * the new attempt. Redis failures are explicit and fail closed at callers.
+   */
+  async claimLagAlertCooldown(
+    journeyId: string,
+    userId: string,
+    severity: LagSeverity,
+    ttlSeconds: number,
+  ): Promise<LagCooldownClaimResult> {
+    try {
+      const key = `lag:cooldown:${journeyId}:${userId}`;
+      const result = await this.client.eval(
+        CLAIM_LAG_ALERT_COOLDOWN_SCRIPT,
+        1,
+        key,
+        severity,
+        ttlSeconds.toString(),
+      );
+      return Number(result) === 1 ? 'ACQUIRED' : 'SUPPRESSED';
+    } catch (error) {
+      this.logger.warn(
+        `Lag cooldown unavailable for ${journeyId}/${userId}: ${(error as Error).message}`,
+        'RedisService',
+        {
+          event: 'lag_cooldown_unavailable',
+          journeyId,
+          userId,
+          severity,
+        },
+      );
+      return 'UNAVAILABLE';
     }
   }
 

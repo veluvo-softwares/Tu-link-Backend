@@ -99,7 +99,16 @@ export class AnalyticsService {
   ): Promise<any[]> {
     // 1) All journey IDs where the user was a participant (replaces
     //    collectionGroup('participants')).
-    const participations = await this.participantRepository.findByUser(userId);
+    // History is not the invitation inbox. Exclude never-joined rows so an
+    // INVITED user cannot see a card that routes to a participant-only detail
+    // endpoint and fails with 403. Active journeys are returned by the
+    // dedicated /journeys/active endpoint.
+    const participations = await this.participantRepository.findByUser(userId, [
+      'ACCEPTED',
+      'ACTIVE',
+      'ARRIVED',
+      'LEFT',
+    ]);
     const journeyIds = Array.from(
       new Set(participations.map((p) => p.journeyId)),
     );
@@ -115,6 +124,10 @@ export class AnalyticsService {
     //    survive the limit.
     const sortedJourneys = journeyResults
       .filter((journey): journey is NonNullable<typeof journey> => !!journey)
+      .filter(
+        (journey) =>
+          journey.status === 'COMPLETED' || journey.status === 'CANCELLED',
+      )
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
       .slice(0, limit);
 

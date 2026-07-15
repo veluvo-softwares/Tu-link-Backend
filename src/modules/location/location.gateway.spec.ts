@@ -38,12 +38,16 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
   let notificationService: jest.Mocked<
     Pick<
       NotificationService,
-      'resolveParticipantRecipients' | 'sendArrivalDetected'
+      'resolveParticipantRecipients' | 'sendArrivalDetected' | 'sendLagAlert'
     >
   >;
+  let redisService: jest.Mocked<Pick<RedisService, 'claimLagAlertCooldown'>>;
+  let logger: jest.Mocked<Pick<LoggerService, 'warn'>>;
+  let emitMock: jest.Mock;
 
   const JOURNEY_ID = 'journey-123';
   const ARRIVER_ID = 'arriver-id';
+  const LAGGARD_ID = 'laggard-id';
 
   const participants: Participant[] = [
     {
@@ -72,6 +76,15 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
       status: 'ACTIVE',
       connectionStatus: 'CONNECTED',
       displayName: 'Bob',
+    },
+    {
+      id: 'p-laggard',
+      userId: LAGGARD_ID,
+      journeyId: JOURNEY_ID,
+      role: 'FOLLOWER',
+      status: 'ACTIVE',
+      connectionStatus: 'CONNECTED',
+      displayName: 'Charlie',
     },
   ];
 
@@ -127,11 +140,26 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
           useValue: {
             resolveParticipantRecipients: jest.fn(),
             sendArrivalDetected: jest.fn().mockResolvedValue(undefined),
+            sendLagAlert: jest.fn().mockResolvedValue(undefined),
           },
         },
         { provide: FirebaseService, useValue: {} },
-        { provide: RedisService, useValue: {} },
-        { provide: ConfigService, useValue: { get: jest.fn() } },
+        {
+          provide: RedisService,
+          useValue: {
+            claimLagAlertCooldown: jest.fn(),
+          },
+        },
+        {
+          provide: ConfigService,
+          useValue: {
+            get: jest.fn().mockImplementation((key: string) => {
+              if (key === 'app.lagCooldownWarningSeconds') return 300;
+              if (key === 'app.lagCooldownCriticalSeconds') return 120;
+              return undefined;
+            }),
+          },
+        },
         {
           provide: LoggerService,
           useValue: {
@@ -149,9 +177,12 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     journeyService = module.get(JourneyService);
     locationService = module.get(LocationService);
     notificationService = module.get(NotificationService);
+    redisService = module.get(RedisService);
+    logger = module.get(LoggerService);
 
     // Mock the socket.io server so broadcast chains do not throw.
     const emit = jest.fn();
+    emitMock = emit;
     gateway.server = {
       to: jest.fn().mockReturnValue({ emit }),
     } as unknown as typeof gateway.server;
@@ -211,5 +242,182 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     expect(
       notificationService.resolveParticipantRecipients,
     ).not.toHaveBeenCalled();
+  });
+
+  /**
+   * NOTIF-10/NOTIF-11 — LocationGateway lag-alert cooldown/escalation/
+   * actor-exclusion unit tests. Reuses the outer beforeEach's module setup
+   * (RedisService/NotificationService/ConfigService mocks extended above)
+   * and the shared `participants` fixture / `makeClient` helper.
+   */
+  describe('handleLocationUpdate — lag alert notification (NOTIF-10/11)', () => {
+    beforeEach(() => {
+      notificationService.resolveParticipantRecipients.mockReturnValue([
+        'leader-id',
+        'other-id',
+      ]);
+    });
+
+    it("fires sendLagAlert with the laggard's name and an actor-excluded recipient list when not in cooldown", async () => {
+      locationService.processLocationUpdate.mockResolvedValue({
+        success: true,
+        shouldBroadcast: false,
+        sequenceNumber: 1,
+        priority: 'HIGH',
+        lagAlert: {
+          participantId: LAGGARD_ID,
+          distanceFromLeader: 620,
+          severity: 'WARNING',
+        },
+      } as any);
+      redisService.claimLagAlertCooldown.mockResolvedValue('ACQUIRED');
+      participantService.getJourneyParticipants.mockResolvedValue(participants);
+
+      await gateway.handleLocationUpdate(makeClient(LAGGARD_ID), payload);
+
+      expect(redisService.claimLagAlertCooldown).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'WARNING',
+        300,
+      );
+      expect(notificationService.sendLagAlert).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'Charlie',
+        620,
+        'WARNING',
+        ['leader-id', 'other-id'],
+      );
+      expect(emitMock).toHaveBeenCalledWith(
+        'lag-alert',
+        expect.objectContaining({ severity: 'WARNING' }),
+      );
+    });
+
+    it('suppresses a second same-severity call within the cooldown window', async () => {
+      locationService.processLocationUpdate.mockResolvedValue({
+        success: true,
+        shouldBroadcast: false,
+        sequenceNumber: 2,
+        priority: 'HIGH',
+        lagAlert: {
+          participantId: LAGGARD_ID,
+          distanceFromLeader: 620,
+          severity: 'WARNING',
+        },
+      } as any);
+      redisService.claimLagAlertCooldown.mockResolvedValue('SUPPRESSED');
+      participantService.getJourneyParticipants.mockResolvedValue(participants);
+
+      await gateway.handleLocationUpdate(makeClient(LAGGARD_ID), payload);
+
+      expect(notificationService.sendLagAlert).not.toHaveBeenCalled();
+      expect(redisService.claimLagAlertCooldown).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'WARNING',
+        300,
+      );
+      expect(emitMock).toHaveBeenCalledWith(
+        'lag-alert',
+        expect.objectContaining({ severity: 'WARNING' }),
+      );
+    });
+
+    it('escalation breaks through: WARNING cooldown active, CRITICAL detected fires immediately', async () => {
+      locationService.processLocationUpdate.mockResolvedValue({
+        success: true,
+        shouldBroadcast: false,
+        sequenceNumber: 3,
+        priority: 'HIGH',
+        lagAlert: {
+          participantId: LAGGARD_ID,
+          distanceFromLeader: 1100,
+          severity: 'CRITICAL',
+        },
+      } as any);
+      redisService.claimLagAlertCooldown.mockResolvedValue('ACQUIRED');
+      participantService.getJourneyParticipants.mockResolvedValue(participants);
+
+      await gateway.handleLocationUpdate(makeClient(LAGGARD_ID), payload);
+
+      expect(notificationService.sendLagAlert).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'Charlie',
+        1100,
+        'CRITICAL',
+        ['leader-id', 'other-id'],
+      );
+      expect(redisService.claimLagAlertCooldown).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'CRITICAL',
+        120,
+      );
+      expect(emitMock).toHaveBeenCalledWith(
+        'lag-alert',
+        expect.objectContaining({ severity: 'CRITICAL' }),
+      );
+    });
+
+    it('does not suppress a de-escalation-shaped call incorrectly (CRITICAL cooldown active, WARNING detected still suppressed)', async () => {
+      locationService.processLocationUpdate.mockResolvedValue({
+        success: true,
+        shouldBroadcast: false,
+        sequenceNumber: 4,
+        priority: 'HIGH',
+        lagAlert: {
+          participantId: LAGGARD_ID,
+          distanceFromLeader: 620,
+          severity: 'WARNING',
+        },
+      } as any);
+      redisService.claimLagAlertCooldown.mockResolvedValue('SUPPRESSED');
+      participantService.getJourneyParticipants.mockResolvedValue(participants);
+
+      await gateway.handleLocationUpdate(makeClient(LAGGARD_ID), payload);
+
+      expect(notificationService.sendLagAlert).not.toHaveBeenCalled();
+      expect(redisService.claimLagAlertCooldown).toHaveBeenCalledWith(
+        JOURNEY_ID,
+        LAGGARD_ID,
+        'WARNING',
+        300,
+      );
+      expect(emitMock).toHaveBeenCalledWith(
+        'lag-alert',
+        expect.objectContaining({ severity: 'WARNING' }),
+      );
+    });
+
+    it('fails closed when Redis cannot enforce the cooldown while preserving the raw WS event', async () => {
+      locationService.processLocationUpdate.mockResolvedValue({
+        success: true,
+        shouldBroadcast: false,
+        sequenceNumber: 5,
+        priority: 'HIGH',
+        lagAlert: {
+          participantId: LAGGARD_ID,
+          distanceFromLeader: 620,
+          severity: 'WARNING',
+        },
+      } as any);
+      redisService.claimLagAlertCooldown.mockResolvedValue('UNAVAILABLE');
+
+      await gateway.handleLocationUpdate(makeClient(LAGGARD_ID), payload);
+
+      expect(notificationService.sendLagAlert).not.toHaveBeenCalled();
+      expect(participantService.getJourneyParticipants).not.toHaveBeenCalled();
+      expect(emitMock).toHaveBeenCalledWith(
+        'lag-alert',
+        expect.objectContaining({ severity: 'WARNING' }),
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('cooldown is unavailable'),
+        'LocationGateway',
+      );
+    });
   });
 });
