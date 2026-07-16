@@ -9,7 +9,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -74,6 +76,26 @@ export class JourneyController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getPendingInvitations(@CurrentUser('uid') userId: string) {
     return this.journeyService.getUserPendingInvitations(userId);
+  }
+
+  @Post('join-code/:code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @ApiOperation({
+    summary: 'Join a pending or active journey using its invite code',
+  })
+  @ApiResponse({ status: 200, description: 'Journey joined successfully' })
+  @ApiResponse({ status: 400, description: 'Journey no longer accepts joins' })
+  @ApiResponse({ status: 404, description: 'Journey code not found' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
+  async joinWithCode(
+    @Param('code') code: string,
+    @CurrentUser('uid') userId: string,
+  ) {
+    if (!/^[2-9A-HJ-NP-Z]{10}$/i.test(code.trim())) {
+      throw new BadRequestException('Invalid journey code');
+    }
+    return this.journeyService.joinWithCode(code, userId);
   }
 
   @Get(':id')

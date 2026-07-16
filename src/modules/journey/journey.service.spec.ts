@@ -21,6 +21,7 @@ describe('JourneyService — single open journey lifecycle', () => {
   let journeyRepository: {
     create: jest.Mock;
     findById: jest.Mock;
+    findByInviteCode: jest.Mock;
     updateStatus: jest.Mock;
   };
   let participantService: {
@@ -31,12 +32,15 @@ describe('JourneyService — single open journey lifecycle', () => {
     addParticipant: jest.Mock;
     getJourneyParticipants: jest.Mock;
     releaseJoinedMemberships: jest.Mock;
+    joinWithCode: jest.Mock;
+    isParticipant: jest.Mock;
   };
 
   beforeEach(() => {
     journeyRepository = {
       create: jest.fn(),
       findById: jest.fn(),
+      findByInviteCode: jest.fn(),
       updateStatus: jest.fn(),
     };
     participantService = {
@@ -47,6 +51,8 @@ describe('JourneyService — single open journey lifecycle', () => {
       addParticipant: jest.fn().mockResolvedValue(undefined),
       getJourneyParticipants: jest.fn().mockResolvedValue([]),
       releaseJoinedMemberships: jest.fn().mockResolvedValue(undefined),
+      joinWithCode: jest.fn().mockResolvedValue(undefined),
+      isParticipant: jest.fn().mockResolvedValue(true),
     };
 
     service = new JourneyService(
@@ -197,5 +203,77 @@ describe('JourneyService — single open journey lifecycle', () => {
       service.delete(targetJourneyId, userId),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(journeyRepository.updateStatus).not.toHaveBeenCalled();
+  });
+
+  it('admits a code join to a pending journey as accepted', async () => {
+    journeyRepository.findByInviteCode.mockResolvedValue(
+      journey(targetJourneyId, 'PENDING'),
+    );
+    journeyRepository.findById.mockResolvedValue(
+      journey(targetJourneyId, 'PENDING'),
+    );
+    participantService.getParticipant.mockResolvedValue(null);
+
+    await expect(service.joinWithCode('abcd234567', userId)).resolves.toEqual(
+      expect.objectContaining({ id: targetJourneyId }),
+    );
+
+    expect(journeyRepository.findByInviteCode).toHaveBeenCalledWith(
+      'ABCD234567',
+    );
+    expect(participantService.joinWithCode).toHaveBeenCalledWith(
+      targetJourneyId,
+      userId,
+      'leader-1',
+      'ACCEPTED',
+    );
+  });
+
+  it('admits a code join to a live journey as active', async () => {
+    journeyRepository.findByInviteCode.mockResolvedValue(
+      journey(targetJourneyId, 'ACTIVE'),
+    );
+    journeyRepository.findById.mockResolvedValue(
+      journey(targetJourneyId, 'ACTIVE'),
+    );
+    participantService.getParticipant.mockResolvedValue(null);
+
+    await service.joinWithCode('ABCD234567', userId);
+
+    expect(participantService.joinWithCode).toHaveBeenCalledWith(
+      targetJourneyId,
+      userId,
+      'leader-1',
+      'ACTIVE',
+    );
+  });
+
+  it('rejects a code join after the journey has completed', async () => {
+    journeyRepository.findByInviteCode.mockResolvedValue(
+      journey(targetJourneyId, 'COMPLETED'),
+    );
+
+    await expect(
+      service.joinWithCode('ABCD234567', userId),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(participantService.joinWithCode).not.toHaveBeenCalled();
+  });
+
+  it('rejects a code join when the user belongs to another open journey', async () => {
+    journeyRepository.findByInviteCode.mockResolvedValue(
+      journey(targetJourneyId, 'PENDING'),
+    );
+    journeyRepository.findById.mockResolvedValue(
+      journey(otherJourneyId, 'ACTIVE'),
+    );
+    participantService.getParticipant.mockResolvedValue(null);
+    participantService.getUserParticipations.mockResolvedValue([
+      { journeyId: otherJourneyId },
+    ]);
+
+    await expect(
+      service.joinWithCode('ABCD234567', userId),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(participantService.joinWithCode).not.toHaveBeenCalled();
   });
 });

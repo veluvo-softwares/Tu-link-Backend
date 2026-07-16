@@ -95,6 +95,45 @@ export class ParticipantRepository {
     return toRecord(row);
   }
 
+  /// Direct admission via a journey code. Unlike a named invitation this
+  /// writes the joined state in one statement, so the partial unique index can
+  /// race-safely reject two concurrent joins to different open journeys
+  /// without leaving a phantom INVITED row behind.
+  async joinWithCode(input: {
+    journeyId: string;
+    userId: string;
+    invitedBy: string;
+    status: 'ACCEPTED' | 'ACTIVE';
+  }): Promise<ParticipantRecord> {
+    const [row] = await this.db
+      .insert(participants)
+      .values({
+        journeyId: input.journeyId,
+        userId: input.userId,
+        invitedBy: input.invitedBy,
+        role: 'FOLLOWER',
+        status: input.status,
+        connectionStatus: 'DISCONNECTED',
+        joinedAt: sql`now()`,
+      })
+      .onConflictDoUpdate({
+        target: [participants.journeyId, participants.userId],
+        set: {
+          invitedBy: input.invitedBy,
+          role: 'FOLLOWER',
+          status: input.status,
+          joinedAt: sql`now()`,
+          leftAt: null,
+          arrivedAt: null,
+          convergedAt: null,
+          lastSeenAt: null,
+          connectionStatus: 'DISCONNECTED',
+        },
+      })
+      .returning();
+    return toRecord(row);
+  }
+
   async findOne(
     journeyId: string,
     userId: string,

@@ -7,6 +7,7 @@ import {
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
+import { randomInt } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../../shared/redis/redis.service';
 import { DatabaseService } from '../../database/database.service';
@@ -43,23 +44,28 @@ export class JourneyService {
   ): Promise<Journey> {
     await this.assertNoOtherOpenJourney(userId);
 
-    let journey: Awaited<ReturnType<JourneyRepository['create']>>;
-    try {
-      journey = await this.journeyRepository.create({
-        name: createJourneyDto.name,
-        leaderId: userId,
-        destination: createJourneyDto.destination,
-        destinationAddress: createJourneyDto.destinationAddress,
-        lagThresholdMeters:
-          createJourneyDto.lagThresholdMeters ||
-          this.configService.get<number>('app.defaultLagThresholdMeters') ||
-          500,
-      });
-    } catch (error) {
-      if (this.isUniqueViolation(error)) {
-        throw this.openJourneyConflict();
+    let journey: Awaited<ReturnType<JourneyRepository['create']>> | null = null;
+    for (let attempt = 0; attempt < 5 && journey == null; attempt++) {
+      try {
+        journey = await this.journeyRepository.create({
+          inviteCode: this.generateInviteCode(),
+          name: createJourneyDto.name,
+          leaderId: userId,
+          destination: createJourneyDto.destination,
+          destinationAddress: createJourneyDto.destinationAddress,
+          lagThresholdMeters:
+            createJourneyDto.lagThresholdMeters ||
+            this.configService.get<number>('app.defaultLagThresholdMeters') ||
+            500,
+        });
+      } catch (error) {
+        if (this.isInviteCodeViolation(error) && attempt < 4) continue;
+        if (this.isUniqueViolation(error)) throw this.openJourneyConflict();
+        throw error;
       }
-      throw error;
+    }
+    if (journey == null) {
+      throw new ConflictException('Could not allocate a journey code');
     }
 
     // Add creator as leader participant
@@ -561,6 +567,102 @@ export class JourneyService {
     }
   }
 
+  async joinWithCode(inviteCode: string, userId: string) {
+    const normalizedCode = inviteCode.trim().toUpperCase();
+    const journey =
+      await this.journeyRepository.findByInviteCode(normalizedCode);
+    if (!journey) throw new NotFoundException('Journey code not found');
+    if (journey.status !== 'PENDING' && journey.status !== 'ACTIVE') {
+      throw new BadRequestException(
+        'This journey is no longer accepting participants',
+      );
+    }
+
+    const existing = await this.participantService.getParticipant(
+      journey.id,
+      userId,
+    );
+    if (
+      existing?.role === 'LEADER' ||
+      (existing && ['ACCEPTED', 'ACTIVE', 'ARRIVED'].includes(existing.status))
+    ) {
+      return this.getJourneyWithParticipants(journey.id, userId);
+    }
+
+    await this.assertNoOtherOpenJourney(userId, journey.id);
+    const joinedStatus = journey.status === 'ACTIVE' ? 'ACTIVE' : 'ACCEPTED';
+    try {
+      await this.participantService.joinWithCode(
+        journey.id,
+        userId,
+        journey.leaderId,
+        joinedStatus,
+      );
+    } catch (error) {
+      if (this.isUniqueViolation(error)) throw this.openJourneyConflict();
+      throw error;
+    }
+
+    if (journey.status === 'ACTIVE') {
+      try {
+        await this.redisService.addJourneyParticipant(journey.id, userId);
+      } catch (error) {
+        // The database admission is already committed. Do not report a failed
+        // join and tempt the client to retry just because the live cache is
+        // temporarily unavailable; socket/location activity can repopulate it.
+        this.logger.error(
+          `Post-code-join Redis sync failed for journey ${journey.id}`,
+          error instanceof Error ? error.stack : undefined,
+          'JourneyService',
+          { journeyId: journey.id, userId },
+        );
+      }
+    }
+
+    const user = await this.usersRepository.findById(userId);
+    const displayName = user?.displayName || 'Unknown';
+    this.locationGateway
+      .broadcastParticipantAccepted(journey.id, {
+        userId,
+        displayName,
+        status: joinedStatus,
+      })
+      .catch((err: Error) =>
+        this.logger.error(
+          `Code-join broadcast failed for journey ${journey.id}`,
+          err.stack,
+          'JourneyService',
+          { journeyId: journey.id, userId },
+        ),
+      );
+
+    try {
+      const participants = await this.participantService.getJourneyParticipants(
+        journey.id,
+      );
+      const recipientIds =
+        this.notificationService.resolveParticipantRecipients(
+          participants,
+          userId,
+        );
+      await this.notificationService.sendParticipantJoined(
+        journey.id,
+        journey.name,
+        displayName,
+        recipientIds,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Post-code-join notification failed for journey ${journey.id}`,
+        error instanceof Error ? error.stack : undefined,
+        'JourneyService',
+        { journeyId: journey.id, userId },
+      );
+    }
+
+    return this.getJourneyWithParticipants(journey.id, userId);
+  }
+
   async inviteParticipant(
     journeyId: string,
     userId: string,
@@ -741,6 +843,21 @@ export class JourneyService {
       (error as { code?: string }).code === '23505' ||
       (error as { cause?: { code?: string } }).cause?.code === '23505'
     );
+  }
+
+  private isInviteCodeViolation(error: unknown): boolean {
+    const constraint =
+      (error as { constraint?: string }).constraint ??
+      (error as { cause?: { constraint?: string } }).cause?.constraint;
+    return constraint === 'idx_journeys_invite_code';
+  }
+
+  private generateInviteCode(): string {
+    const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    return Array.from(
+      { length: 10 },
+      () => alphabet[randomInt(alphabet.length)],
+    ).join('');
   }
 
   private openJourneyConflict(

@@ -2,6 +2,7 @@ import { JourneyStatus } from '../../types/journey-status.type';
 
 export interface Journey {
   id: string;
+  inviteCode: string;
   name: string;
   leaderId: string;
   status: JourneyStatus;

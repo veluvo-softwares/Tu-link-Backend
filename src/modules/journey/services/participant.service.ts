@@ -45,6 +45,21 @@ export class ParticipantService {
     }
   }
 
+  async joinWithCode(
+    journeyId: string,
+    userId: string,
+    leaderId: string,
+    status: 'ACCEPTED' | 'ACTIVE',
+  ): Promise<Participant> {
+    const participant = await this.participantRepository.joinWithCode({
+      journeyId,
+      userId,
+      invitedBy: leaderId,
+      status,
+    });
+    return participant as unknown as Participant;
+  }
+
   async declineInvitation(journeyId: string, userId: string): Promise<void> {
     const updated = await this.participantRepository.decline(journeyId, userId);
     if (!updated) {
