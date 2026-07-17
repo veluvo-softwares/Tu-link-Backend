@@ -765,13 +765,20 @@ export class LocationGateway
   async handleHeartbeat(@ConnectedSocket() client: Socket) {
     const userId = client.data.userId;
 
-    // Update last heartbeat in Redis
-    if (userId) {
-      await this.redisService.setLastHeartbeat(userId);
-    }
-
-    // Reset timeout
+    // Reset the eviction timer FIRST. When the Redis write below fails or
+    // stalls, the reset must still happen — otherwise a live, heartbeating
+    // client gets evicted 30s later (observed in production: clients kicked
+    // ~30s after their journey's Redis keys were cleared, mid-session).
     this.resetHeartbeatTimeout(client);
+
+    // Record last heartbeat in Redis — best effort only.
+    if (userId) {
+      try {
+        await this.redisService.setLastHeartbeat(userId);
+      } catch {
+        // Liveness is already recorded via the timer reset above.
+      }
+    }
 
     // Send heartbeat response
     client.emit('heartbeat-ack', {
