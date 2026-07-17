@@ -50,6 +50,7 @@ describe('LagDetectionService — convergence gate (NOTIF-16)', () => {
 
   const journey: Journey = {
     id: JOURNEY_ID,
+    inviteCode: '23456789AB',
     name: 'Test Journey',
     leaderId: LEADER_ID,
     status: 'ACTIVE',

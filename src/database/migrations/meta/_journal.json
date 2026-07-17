@@ -43,6 +43,20 @@
       "when": 1784015292603,
       "tag": "0005_participant_convergence_convoy_joined",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784115595785,
+      "tag": "0006_strong_sharon_ventura",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784240979304,
+      "tag": "0007_striped_terror",
+      "breakpoints": true
     }
   ]
 }

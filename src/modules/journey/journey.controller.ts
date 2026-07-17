@@ -9,7 +9,9 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  BadRequestException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   ApiTags,
   ApiOperation,
@@ -46,6 +48,7 @@ export class JourneyController {
   @ApiResponse({ status: 201, description: 'Journey created successfully' })
   @ApiResponse({ status: 400, description: 'Validation error' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
   async create(
     @CurrentUser('uid') userId: string,
     @Body() createJourneyDto: CreateJourneyDto,
@@ -54,10 +57,10 @@ export class JourneyController {
   }
 
   @Get('active')
-  @ApiOperation({ summary: 'Get user active journeys' })
+  @ApiOperation({ summary: 'Get user pending or active journeys' })
   @ApiResponse({
     status: 200,
-    description: 'Active journeys retrieved successfully',
+    description: 'Pending or active journeys retrieved successfully',
   })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getActiveJourneys(@CurrentUser('uid') userId: string) {
@@ -73,6 +76,26 @@ export class JourneyController {
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getPendingInvitations(@CurrentUser('uid') userId: string) {
     return this.journeyService.getUserPendingInvitations(userId);
+  }
+
+  @Post('join-code/:code')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { ttl: 60000, limit: 10 } })
+  @ApiOperation({
+    summary: 'Join a pending or active journey using its invite code',
+  })
+  @ApiResponse({ status: 200, description: 'Journey joined successfully' })
+  @ApiResponse({ status: 400, description: 'Journey no longer accepts joins' })
+  @ApiResponse({ status: 404, description: 'Journey code not found' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
+  async joinWithCode(
+    @Param('code') code: string,
+    @CurrentUser('uid') userId: string,
+  ) {
+    if (!/^[2-9A-HJ-NP-Z]{10}$/i.test(code.trim())) {
+      throw new BadRequestException('Invalid journey code');
+    }
+    return this.journeyService.joinWithCode(code, userId);
   }
 
   @Get(':id')
@@ -228,6 +251,7 @@ export class JourneyController {
   })
   @ApiResponse({ status: 200, description: 'Invitation accepted successfully' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 409, description: 'User is already in a journey' })
   @ApiResponse({
     status: 404,
     description: 'Journey not found OR Invitation not found',
@@ -260,7 +284,7 @@ export class JourneyController {
   @ApiOperation({
     summary: 'Leave journey',
     description:
-      'Leave an active journey. Changes participant status to LEFT. Cannot leave if you are the leader.',
+      'Leave a pending or active journey. Changes participant status to LEFT. Cannot leave if you are the leader.',
   })
   @ApiResponse({ status: 200, description: 'Left journey successfully' })
   @ApiResponse({

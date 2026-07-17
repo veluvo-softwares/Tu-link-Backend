@@ -95,6 +95,45 @@ export class ParticipantRepository {
     return toRecord(row);
   }
 
+  /// Direct admission via a journey code. Unlike a named invitation this
+  /// writes the joined state in one statement, so the partial unique index can
+  /// race-safely reject two concurrent joins to different open journeys
+  /// without leaving a phantom INVITED row behind.
+  async joinWithCode(input: {
+    journeyId: string;
+    userId: string;
+    invitedBy: string;
+    status: 'ACCEPTED' | 'ACTIVE';
+  }): Promise<ParticipantRecord> {
+    const [row] = await this.db
+      .insert(participants)
+      .values({
+        journeyId: input.journeyId,
+        userId: input.userId,
+        invitedBy: input.invitedBy,
+        role: 'FOLLOWER',
+        status: input.status,
+        connectionStatus: 'DISCONNECTED',
+        joinedAt: sql`now()`,
+      })
+      .onConflictDoUpdate({
+        target: [participants.journeyId, participants.userId],
+        set: {
+          invitedBy: input.invitedBy,
+          role: 'FOLLOWER',
+          status: input.status,
+          joinedAt: sql`now()`,
+          leftAt: null,
+          arrivedAt: null,
+          convergedAt: null,
+          lastSeenAt: null,
+          connectionStatus: 'DISCONNECTED',
+        },
+      })
+      .returning();
+    return toRecord(row);
+  }
+
   async findOne(
     journeyId: string,
     userId: string,
@@ -163,8 +202,28 @@ export class ParticipantRepository {
     return row ? toRecord(row) : null;
   }
 
+  private async transition(
+    journeyId: string,
+    userId: string,
+    from: ParticipantStatus[],
+    set: Record<string, unknown>,
+  ): Promise<ParticipantRecord | null> {
+    const [row] = await this.db
+      .update(participants)
+      .set(set)
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          eq(participants.userId, userId),
+          inArray(participants.status, from),
+        ),
+      )
+      .returning();
+    return row ? toRecord(row) : null;
+  }
+
   accept(journeyId: string, userId: string): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
+    return this.transition(journeyId, userId, ['INVITED'], {
       status: 'ACCEPTED',
       joinedAt: sql`now()`,
     });
@@ -175,7 +234,7 @@ export class ParticipantRepository {
     journeyId: string,
     userId: string,
   ): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
+    return this.transition(journeyId, userId, ['INVITED'], {
       status: 'ACTIVE',
       joinedAt: sql`now()`,
     });
@@ -185,14 +244,22 @@ export class ParticipantRepository {
     journeyId: string,
     userId: string,
   ): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, { status: 'DECLINED' });
+    return this.transition(journeyId, userId, ['INVITED'], {
+      status: 'DECLINED',
+    });
   }
 
   leave(journeyId: string, userId: string): Promise<ParticipantRecord | null> {
-    return this.patch(journeyId, userId, {
-      status: 'LEFT',
-      leftAt: sql`now()`,
-    });
+    return this.transition(
+      journeyId,
+      userId,
+      ['ACCEPTED', 'ACTIVE', 'ARRIVED'],
+      {
+        status: 'LEFT',
+        leftAt: sql`now()`,
+        connectionStatus: 'DISCONNECTED',
+      },
+    );
   }
 
   markArrived(
@@ -275,6 +342,22 @@ export class ParticipantRepository {
             eq(participants.status, 'ACCEPTED'),
             eq(participants.role, 'LEADER'),
           ),
+        ),
+      );
+  }
+
+  async releaseJoinedMemberships(journeyId: string): Promise<void> {
+    await this.db
+      .update(participants)
+      .set({
+        status: 'LEFT',
+        leftAt: sql`now()`,
+        connectionStatus: 'DISCONNECTED',
+      })
+      .where(
+        and(
+          eq(participants.journeyId, journeyId),
+          inArray(participants.status, ['ACCEPTED', 'ACTIVE', 'ARRIVED']),
         ),
       );
   }

@@ -10,6 +10,7 @@ import { JourneyMetadata, journeys } from '../schema';
 
 export interface JourneyRecord {
   id: string;
+  inviteCode: string;
   name: string;
   leaderId: string;
   status: JourneyStatus;
@@ -24,6 +25,7 @@ export interface JourneyRecord {
 }
 
 export interface CreateJourneyInput {
+  inviteCode: string;
   name: string;
   leaderId: string;
   destination?: LatLng;
@@ -52,6 +54,7 @@ export class JourneyRepository {
   private selection() {
     return {
       id: journeys.id,
+      inviteCode: journeys.inviteCode,
       name: journeys.name,
       leaderId: journeys.leaderId,
       status: journeys.status,
@@ -69,6 +72,7 @@ export class JourneyRepository {
 
   private toRecord(row: {
     id: string;
+    inviteCode: string;
     name: string;
     leaderId: string;
     status: JourneyStatus;
@@ -97,6 +101,7 @@ export class JourneyRepository {
       .insert(journeys)
       .values({
         name: input.name,
+        inviteCode: input.inviteCode,
         leaderId: input.leaderId,
         destination: input.destination
           ? geogPoint(input.destination.latitude, input.destination.longitude)
@@ -114,6 +119,15 @@ export class JourneyRepository {
       .select(this.selection())
       .from(journeys)
       .where(eq(journeys.id, journeyId))
+      .limit(1);
+    return row ? this.toRecord(row) : null;
+  }
+
+  async findByInviteCode(inviteCode: string): Promise<JourneyRecord | null> {
+    const [row] = await this.db
+      .select(this.selection())
+      .from(journeys)
+      .where(eq(journeys.inviteCode, inviteCode))
       .limit(1);
     return row ? this.toRecord(row) : null;
   }

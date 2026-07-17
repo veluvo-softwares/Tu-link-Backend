@@ -177,6 +177,31 @@ export class NotificationService {
     );
   }
 
+  async sendJourneyCancelled(
+    journeyId: string,
+    journeyName: string,
+    recipientIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_ENDED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_ENDED',
+        title: 'Journey Cancelled',
+        body: `The journey "${journeyName}" was cancelled by its leader`,
+        data: {
+          type: 'JOURNEY_ENDED',
+          journeyId,
+          journeyName,
+          reason: 'cancelled',
+        },
+      }),
+    );
+  }
+
   /**
    * Send lag alert notification (D-01/D-02/D-03, D-09 envelope).
    * Notifies both the laggard (self-directed) and the rest of the active

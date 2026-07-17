@@ -114,4 +114,26 @@ describe('NotificationService notifications', () => {
       },
     });
   });
+
+  it('persists explicit cancellation feedback for affected members', async () => {
+    const createNotification = jest.spyOn(service, 'createNotification');
+
+    await service.sendJourneyCancelled(journeyId, 'Weekend convoy', [
+      laggardUserId,
+    ]);
+
+    expect(createNotification).toHaveBeenCalledWith({
+      journeyId,
+      recipientId: laggardUserId,
+      type: 'JOURNEY_ENDED',
+      title: 'Journey Cancelled',
+      body: 'The journey "Weekend convoy" was cancelled by its leader',
+      data: {
+        type: 'JOURNEY_ENDED',
+        journeyId,
+        journeyName: 'Weekend convoy',
+        reason: 'cancelled',
+      },
+    });
+  });
 });
