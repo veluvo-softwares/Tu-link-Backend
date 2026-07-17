@@ -29,7 +29,9 @@ services:
     profiles:
       - server
     volumes:
-      - ../../src:/usr/src/app/src:ro
+      # Server deployments run the source baked into the image. Bind-mounting
+      # the rsynced source here lets the live watch process reload new queries
+      # before their database migration has completed.
       - ../../logs:/usr/src/app/logs
     command: npm run start:dev
     healthcheck:
