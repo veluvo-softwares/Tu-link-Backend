@@ -203,6 +203,83 @@ export class NotificationService {
   }
 
   /**
+   * Scheduled-journey reminder ladder (T-24h / T-1h / T-15m). [tierLabel] is
+   * human copy like "tomorrow", "in 1 hour", "in 15 minutes".
+   */
+  async sendJourneyReminder(
+    journeyId: string,
+    journeyName: string,
+    tierLabel: string,
+    recipientIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_REMINDER',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_REMINDER',
+        title: 'Upcoming Journey',
+        body: `"${journeyName}" starts ${tierLabel}`,
+        data: { type: 'JOURNEY_REMINDER', journeyId, journeyName },
+      }),
+    );
+  }
+
+  /**
+   * Scheduled instant has arrived and the journey does not auto-start.
+   * The leader gets a call-to-action; members get a waiting notice.
+   */
+  async sendJourneyStartingNow(
+    journeyId: string,
+    journeyName: string,
+    leaderId: string,
+    memberIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_STARTING_NOW',
+      journeyId,
+      [leaderId, ...memberIds],
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_STARTING_NOW',
+        title:
+          recipientId === leaderId
+            ? 'Your convoy is ready to roll'
+            : 'Journey starting',
+        body:
+          recipientId === leaderId
+            ? `It's time — start "${journeyName}" now`
+            : `"${journeyName}" is due to start — waiting for the leader`,
+        data: { type: 'JOURNEY_STARTING_NOW', journeyId, journeyName },
+      }),
+    );
+  }
+
+  /** Leader nudge when a scheduled journey has blown past its start time. */
+  async sendJourneyMissedStart(
+    journeyId: string,
+    journeyName: string,
+    leaderId: string,
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_MISSED_START',
+      journeyId,
+      [leaderId],
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_MISSED_START',
+        title: 'Journey not started',
+        body: `"${journeyName}" was scheduled to start — start it or cancel`,
+        data: { type: 'JOURNEY_MISSED_START', journeyId, journeyName },
+      }),
+    );
+  }
+
+  /**
    * Send lag alert notification (D-01/D-02/D-03, D-09 envelope).
    * Notifies both the laggard (self-directed) and the rest of the active
    * group (third-person), additive on top of the pre-existing laggard-only

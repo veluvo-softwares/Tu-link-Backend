@@ -6,6 +6,7 @@ export interface Journey {
   name: string;
   leaderId: string;
   status: JourneyStatus;
+  scheduledFor?: Date;
   startTime?: Date;
   endTime?: Date;
   destination?: { latitude: number; longitude: number };
@@ -16,5 +17,7 @@ export interface Journey {
   metadata: {
     totalDistance?: number;
     estimatedDuration?: number;
+    autoStart?: boolean;
+    remindersSent?: string[];
   };
 }

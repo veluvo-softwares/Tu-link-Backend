@@ -52,6 +52,9 @@ export const notificationTypeEnum = pgEnum('notification_type', [
   'PARTICIPANT_LEFT',
   'ARRIVAL_DETECTED',
   'CONVOY_JOINED',
+  'JOURNEY_REMINDER',
+  'JOURNEY_STARTING_NOW',
+  'JOURNEY_MISSED_START',
 ]);
 
 // src/types/notification.type.ts (LagSeverity)
