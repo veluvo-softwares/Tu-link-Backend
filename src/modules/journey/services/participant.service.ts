@@ -45,6 +45,21 @@ export class ParticipantService {
     }
   }
 
+  async joinWithCode(
+    journeyId: string,
+    userId: string,
+    leaderId: string,
+    status: 'ACCEPTED' | 'ACTIVE',
+  ): Promise<Participant> {
+    const participant = await this.participantRepository.joinWithCode({
+      journeyId,
+      userId,
+      invitedBy: leaderId,
+      status,
+    });
+    return participant as unknown as Participant;
+  }
+
   async declineInvitation(journeyId: string, userId: string): Promise<void> {
     const updated = await this.participantRepository.decline(journeyId, userId);
     if (!updated) {
@@ -64,7 +79,10 @@ export class ParticipantService {
       throw new ForbiddenException('Leader cannot leave journey');
     }
 
-    await this.participantRepository.leave(journeyId, userId);
+    const updated = await this.participantRepository.leave(journeyId, userId);
+    if (!updated) {
+      throw new NotFoundException('Active journey membership not found');
+    }
 
     // Remove from Redis
     await this.redisService.removeJourneyParticipant(journeyId, userId);
@@ -116,6 +134,10 @@ export class ParticipantService {
     await this.participantRepository.activateForStart(journeyId);
   }
 
+  async releaseJoinedMemberships(journeyId: string): Promise<void> {
+    await this.participantRepository.releaseJoinedMemberships(journeyId);
+  }
+
   async isParticipant(journeyId: string, userId: string): Promise<boolean> {
     const participant = await this.participantRepository.findOne(
       journeyId,
@@ -137,7 +159,11 @@ export class ParticipantService {
       userId,
     );
     if (!participant) return false;
-    return participant.status === 'ACTIVE' || participant.status === 'ACCEPTED';
+    // ARRIVED members remain part of an ACTIVE journey until the whole convoy
+    // completes. Their clients keep sending stationary beacons so peers can
+    // see them at the destination; rejecting those updates creates an error
+    // storm and corrupts journey health metrics.
+    return ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(participant.status);
   }
 
   async updateConnectionStatus(

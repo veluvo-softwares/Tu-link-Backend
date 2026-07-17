@@ -12,6 +12,7 @@ import { UsersRepository } from '../../database/repositories/users.repository';
 import { LoggerService } from '../../shared/logger/logger.service';
 import { RedisService } from '../../shared/redis/redis.service';
 import { Participant } from '../../shared/interfaces/participant.interface';
+import { LagSeverity } from '../../types/notification.type';
 
 @Injectable()
 export class NotificationService {
@@ -176,26 +177,117 @@ export class NotificationService {
     );
   }
 
+  async sendJourneyCancelled(
+    journeyId: string,
+    journeyName: string,
+    recipientIds: string[],
+  ): Promise<void> {
+    await this.fanOutNotifications(
+      'JOURNEY_ENDED',
+      journeyId,
+      recipientIds,
+      (recipientId) => ({
+        journeyId,
+        recipientId,
+        type: 'JOURNEY_ENDED',
+        title: 'Journey Cancelled',
+        body: `The journey "${journeyName}" was cancelled by its leader`,
+        data: {
+          type: 'JOURNEY_ENDED',
+          journeyId,
+          journeyName,
+          reason: 'cancelled',
+        },
+      }),
+    );
+  }
+
   /**
-   * Send lag alert notification
+   * Send lag alert notification (D-01/D-02/D-03, D-09 envelope).
+   * Notifies both the laggard (self-directed) and the rest of the active
+   * group (third-person), additive on top of the pre-existing laggard-only
+   * behavior. The two legs are fault-isolated so either audience can still
+   * receive its notification when the other leg fails.
    */
   async sendLagAlert(
     journeyId: string,
-    userId: string,
+    laggardUserId: string,
+    laggardName: string,
     distance: number,
-    severity: 'WARNING' | 'CRITICAL',
+    severity: LagSeverity,
+    groupRecipientIds: string[],
   ): Promise<void> {
     const title =
       severity === 'CRITICAL' ? 'Critical Lag Alert' : 'Lag Warning';
-    const body = `You are ${Math.round(distance)}m behind the leader`;
+    const roundedDistance = Math.round(distance);
 
+    const [laggardResult] = await Promise.allSettled([
+      // Leg 1: laggard, self-directed.
+      this.createNotification({
+        journeyId,
+        recipientId: laggardUserId,
+        type: 'LAG_ALERT',
+        title,
+        body: `You are ${roundedDistance}m behind the leader`,
+        data: {
+          type: 'LAG_ALERT',
+          journeyId,
+          distance: distance.toString(),
+          severity,
+        },
+      }),
+      // Leg 2: group, third-person.
+      this.fanOutNotifications(
+        'LAG_ALERT',
+        journeyId,
+        groupRecipientIds,
+        (recipientId) => ({
+          journeyId,
+          recipientId,
+          type: 'LAG_ALERT',
+          title,
+          body: `${laggardName} is ${roundedDistance}m behind`,
+          data: {
+            type: 'LAG_ALERT',
+            journeyId,
+            distance: distance.toString(),
+            severity,
+          },
+        }),
+      ),
+    ]);
+
+    if (laggardResult.status === 'rejected') {
+      this.logger.warn(
+        `Laggard lag-alert notification failed for journey ${journeyId}, user ${laggardUserId}: ${(laggardResult.reason as Error).message}`,
+        'NotificationService',
+      );
+    }
+  }
+
+  /**
+   * Send convergence notification (D-07/D-08). Persisted to the in-app feed
+   * via createNotification — unlike sendSetupConfirmationPush, which is
+   * deliberately ephemeral/push-only. Convergence is journey-scoped and
+   * one-shot per journey, so it has history value; setup-confirmation is
+   * app-level and re-fires on re-registration, so it does not.
+   */
+  async sendConvoyJoined(
+    journeyId: string,
+    userId: string,
+    lagThresholdMeters: number,
+  ): Promise<void> {
     await this.createNotification({
       journeyId,
       recipientId: userId,
-      type: 'LAG_ALERT',
-      title,
-      body,
-      data: { distance: distance.toString(), severity },
+      type: 'CONVOY_JOINED',
+      title: "You've joined the convoy",
+      body: `You'll be alerted if you fall more than ${lagThresholdMeters}m behind.`,
+      data: {
+        type: 'CONVOY_JOINED',
+        journeyId,
+        lagThresholdMeters: lagThresholdMeters.toString(),
+      },
     });
   }
 

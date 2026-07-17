@@ -29,6 +29,7 @@ import { AcknowledgeDto } from './dto/acknowledge.dto';
 import { ResyncDto } from './dto/resync.dto';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { NotificationService } from '../notification/notification.service';
+import { LagSeverity } from '../../types/notification.type';
 
 @WebSocketGateway({
   cors: { origin: '*' },
@@ -406,6 +407,69 @@ export class LocationGateway
           severity: result.lagAlert.severity,
           timestamp: Date.now(),
         });
+
+        // Best-effort, cooldown-gated, named, group-aware lag-alert
+        // notification fan-out (D-01/D-02/D-03, NOTIF-10/NOTIF-11). This is
+        // additional to, and does not affect, the raw WS emit above.
+        try {
+          const laggardUserId = result.lagAlert.participantId;
+          const severity = result.lagAlert.severity as LagSeverity;
+
+          const ttlSeconds =
+            severity === 'CRITICAL'
+              ? (this.configService.get<number>(
+                  'app.lagCooldownCriticalSeconds',
+                ) ?? 120)
+              : (this.configService.get<number>(
+                  'app.lagCooldownWarningSeconds',
+                ) ?? 300);
+          const cooldownClaim = await this.redisService.claimLagAlertCooldown(
+            payload.journeyId,
+            laggardUserId,
+            severity,
+            ttlSeconds,
+          );
+
+          // The claim is attempt-based: once acquired, failures are logged but
+          // do not release it and risk a notification storm. If Redis is down,
+          // fail closed for push/feed while the raw WS event above continues.
+          if (cooldownClaim === 'ACQUIRED') {
+            const participants =
+              await this.participantService.getJourneyParticipants(
+                payload.journeyId,
+              );
+            const laggardParticipant = participants.find(
+              (p) => p.userId === laggardUserId,
+            );
+            const laggardName =
+              laggardParticipant?.displayName ?? 'A participant';
+            const groupRecipientIds =
+              this.notificationService.resolveParticipantRecipients(
+                participants,
+                laggardUserId,
+              );
+
+            await this.notificationService.sendLagAlert(
+              payload.journeyId,
+              laggardUserId,
+              laggardName,
+              result.lagAlert.distanceFromLeader,
+              severity,
+              groupRecipientIds,
+            );
+          } else if (cooldownClaim === 'UNAVAILABLE') {
+            this.logger.warn(
+              `Lag notification suppressed because cooldown is unavailable for journey ${payload.journeyId}`,
+              'LocationGateway',
+            );
+          }
+        } catch (err) {
+          this.logger.error(
+            `Lag alert notification failed for journey ${payload.journeyId}: ${(err as Error).message}`,
+            'LocationGateway',
+          );
+          // Do NOT rethrow — mirrors the arrival-notification / handleAuthLogout pattern.
+        }
       }
 
       // Handle arrival events
@@ -761,6 +825,8 @@ export class LocationGateway
   async broadcastJourneyEnded(journeyId: string, journey: any) {
     this.server.to(`journey:${journeyId}`).emit('journey-ended', {
       journey,
+      reason: journey?.status === 'CANCELLED' ? 'cancelled' : 'completed',
+      endedAt: new Date().toISOString(),
       timestamp: Date.now(),
     });
   }

@@ -22,6 +22,7 @@ export const journeys = pgTable(
   'journeys',
   {
     id: uuid('id').defaultRandom().primaryKey(),
+    inviteCode: text('invite_code').notNull(),
     name: text('name').notNull(),
     leaderId: text('leader_id')
       .notNull()
@@ -44,8 +45,9 @@ export const journeys = pgTable(
     index('idx_journeys_leader').on(t.leaderId),
     index('idx_journeys_status').on(t.status),
     index('idx_journeys_dest').using('gist', t.destination),
-    uniqueIndex('idx_journeys_one_active_per_leader')
+    uniqueIndex('idx_journeys_invite_code').on(t.inviteCode),
+    uniqueIndex('idx_journeys_one_open_per_leader')
       .on(t.leaderId)
-      .where(sql`status = 'ACTIVE'`),
+      .where(sql`status IN ('PENDING', 'ACTIVE')`),
   ],
 );
