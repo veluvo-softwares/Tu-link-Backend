@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, lte, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { JourneyStatus } from '../../types/journey-status.type';
@@ -14,6 +14,7 @@ export interface JourneyRecord {
   name: string;
   leaderId: string;
   status: JourneyStatus;
+  scheduledFor: Date | null;
   startTime: Date | null;
   endTime: Date | null;
   destination: LatLng | null;
@@ -31,6 +32,7 @@ export interface CreateJourneyInput {
   destination?: LatLng;
   destinationAddress?: string;
   lagThresholdMeters: number;
+  scheduledFor?: Date;
   metadata?: JourneyMetadata;
 }
 
@@ -39,6 +41,8 @@ export interface UpdateJourneyInput {
   destination?: LatLng;
   destinationAddress?: string;
   lagThresholdMeters?: number;
+  scheduledFor?: Date;
+  metadata?: JourneyMetadata;
 }
 
 @Injectable()
@@ -58,6 +62,7 @@ export class JourneyRepository {
       name: journeys.name,
       leaderId: journeys.leaderId,
       status: journeys.status,
+      scheduledFor: journeys.scheduledFor,
       startTime: journeys.startTime,
       endTime: journeys.endTime,
       destinationLat: selectLat(journeys.destination),
@@ -76,6 +81,7 @@ export class JourneyRepository {
     name: string;
     leaderId: string;
     status: JourneyStatus;
+    scheduledFor: Date | null;
     startTime: Date | null;
     endTime: Date | null;
     destinationLat: number | null;
@@ -108,6 +114,7 @@ export class JourneyRepository {
           : undefined,
         destinationAddress: input.destinationAddress,
         lagThresholdMeters: input.lagThresholdMeters,
+        scheduledFor: input.scheduledFor,
         metadata: input.metadata ?? {},
       })
       .returning(this.selection());
@@ -171,6 +178,8 @@ export class JourneyRepository {
         patch.destination.latitude,
         patch.destination.longitude,
       );
+    if (patch.scheduledFor !== undefined) set.scheduledFor = patch.scheduledFor;
+    if (patch.metadata !== undefined) set.metadata = patch.metadata;
 
     const [row] = await this.db
       .update(journeys)
@@ -178,6 +187,40 @@ export class JourneyRepository {
       .where(eq(journeys.id, journeyId))
       .returning(this.selection());
     return row ? this.toRecord(row) : null;
+  }
+
+  /**
+   * All PENDING scheduled journeys whose scheduled_for falls at or before
+   * [horizon]. Single scan used by the scheduler cron: the horizon is
+   * now + the longest reminder tier, and per-journey tier logic decides
+   * what (if anything) is due. Served by idx_journeys_scheduled.
+   */
+  async findScheduledWithin(horizon: Date): Promise<JourneyRecord[]> {
+    const rows = await this.db
+      .select(this.selection())
+      .from(journeys)
+      .where(
+        and(
+          eq(journeys.status, 'PENDING'),
+          isNotNull(journeys.scheduledFor),
+          lte(journeys.scheduledFor, horizon),
+        ),
+      );
+    return rows.map((row) => this.toRecord(row));
+  }
+
+  /**
+   * Merge scheduler bookkeeping into metadata. Single-writer by design: only
+   * the Redis-locked scheduler cron calls this, so read-modify-write is safe.
+   */
+  async updateMetadata(
+    journeyId: string,
+    metadata: JourneyMetadata,
+  ): Promise<void> {
+    await this.db
+      .update(journeys)
+      .set({ metadata, updatedAt: sql`now()` })
+      .where(eq(journeys.id, journeyId));
   }
 
   // Drives start / end / delete / auto-complete status transitions, optionally

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ScheduleModule } from '@nestjs/schedule';
 import { APP_GUARD } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -46,6 +47,8 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     // Event bus (decouples AuthService -> LocationGateway, see Phase 3)
     EventEmitterModule.forRoot(),
+    // In-process cron for scheduled journeys (JourneySchedulerService)
+    ScheduleModule.forRoot(),
     // Shared modules
     LoggerModule,
     FirebaseModule,

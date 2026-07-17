@@ -38,11 +38,35 @@ export class JourneyService {
     private logger: LoggerService,
   ) {}
 
+  /**
+   * Validate a client-supplied schedule instant. Bounds keep the scheduler
+   * scan meaningful: far enough out that reminders make sense, near enough
+   * that a PENDING row doesn't squat the one-open-per-leader slot for months.
+   */
+  private parseScheduledFor(scheduledFor: string): Date {
+    const when = new Date(scheduledFor);
+    const minMs = Date.now() + 5 * 60 * 1000;
+    const maxMs = Date.now() + 60 * 24 * 60 * 60 * 1000;
+    if (Number.isNaN(when.getTime()) || when.getTime() < minMs) {
+      throw new BadRequestException(
+        'scheduledFor must be at least 5 minutes in the future',
+      );
+    }
+    if (when.getTime() > maxMs) {
+      throw new BadRequestException('scheduledFor must be within 60 days');
+    }
+    return when;
+  }
+
   async create(
     userId: string,
     createJourneyDto: CreateJourneyDto,
   ): Promise<Journey> {
     await this.assertNoOtherOpenJourney(userId);
+
+    const scheduledFor = createJourneyDto.scheduledFor
+      ? this.parseScheduledFor(createJourneyDto.scheduledFor)
+      : undefined;
 
     let journey: Awaited<ReturnType<JourneyRepository['create']>> | null = null;
     for (let attempt = 0; attempt < 5 && journey == null; attempt++) {
@@ -57,6 +81,11 @@ export class JourneyService {
             createJourneyDto.lagThresholdMeters ||
             this.configService.get<number>('app.defaultLagThresholdMeters') ||
             500,
+          scheduledFor,
+          metadata:
+            scheduledFor && createJourneyDto.autoStart
+              ? { autoStart: true }
+              : undefined,
         });
       } catch (error) {
         if (this.isInviteCodeViolation(error) && attempt < 4) continue;
@@ -166,11 +195,27 @@ export class JourneyService {
       throw new BadRequestException('Can only update pending journeys');
     }
 
+    let metadata: Journey['metadata'] | undefined;
+    let scheduledFor: Date | undefined;
+    if (updateJourneyDto.scheduledFor !== undefined) {
+      scheduledFor = this.parseScheduledFor(updateJourneyDto.scheduledFor);
+      // Rescheduling restarts the reminder ladder for the new instant.
+      metadata = { ...journey.metadata, remindersSent: [] };
+    }
+    if (updateJourneyDto.autoStart !== undefined) {
+      metadata = {
+        ...(metadata ?? journey.metadata),
+        autoStart: updateJourneyDto.autoStart,
+      };
+    }
+
     await this.journeyRepository.update(journeyId, {
       name: updateJourneyDto.name,
       destination: updateJourneyDto.destination,
       destinationAddress: updateJourneyDto.destinationAddress,
       lagThresholdMeters: updateJourneyDto.lagThresholdMeters,
+      scheduledFor,
+      metadata,
     });
 
     return this.findById(journeyId);

@@ -6,7 +6,10 @@ export type NotificationType =
   | 'PARTICIPANT_JOINED'
   | 'PARTICIPANT_LEFT'
   | 'ARRIVAL_DETECTED'
-  | 'CONVOY_JOINED';
+  | 'CONVOY_JOINED'
+  | 'JOURNEY_REMINDER'
+  | 'JOURNEY_STARTING_NOW'
+  | 'JOURNEY_MISSED_START';
 
 export type LagSeverity = 'WARNING' | 'CRITICAL';
 

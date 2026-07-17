@@ -16,6 +16,10 @@ import { users } from './users';
 export interface JourneyMetadata {
   totalDistance?: number;
   estimatedDuration?: number;
+  /** Scheduled journeys: start automatically at scheduled_for (vs. nudge the leader). */
+  autoStart?: boolean;
+  /** Reminder ladder dedupe — tier keys already sent (e.g. '24h', '1h', '15m', 'start-due', 'missed-nudge'). */
+  remindersSent?: string[];
 }
 
 export const journeys = pgTable(
@@ -28,6 +32,10 @@ export const journeys = pgTable(
       .notNull()
       .references(() => users.id),
     status: journeyStatusEnum('status').notNull().default('PENDING'),
+    // When set on a PENDING journey, the journey is "scheduled": the cron in
+    // JourneySchedulerService sends the reminder ladder and handles start at
+    // this instant. NULL = start-now journey (existing behavior).
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
     startTime: timestamp('start_time', { withTimezone: true }),
     endTime: timestamp('end_time', { withTimezone: true }),
     destination: geographyPoint('destination'),
@@ -49,5 +57,10 @@ export const journeys = pgTable(
     uniqueIndex('idx_journeys_one_open_per_leader')
       .on(t.leaderId)
       .where(sql`status IN ('PENDING', 'ACTIVE')`),
+    // Cron scan for due scheduled journeys stays narrow: only pending rows
+    // that actually have a schedule.
+    index('idx_journeys_scheduled')
+      .on(t.scheduledFor)
+      .where(sql`status = 'PENDING' AND scheduled_for IS NOT NULL`),
   ],
 );

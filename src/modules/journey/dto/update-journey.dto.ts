@@ -1,4 +1,6 @@
 import {
+  IsBoolean,
+  IsISO8601,
   IsString,
   IsOptional,
   IsNumber,
@@ -33,4 +35,13 @@ export class UpdateJourneyDto {
   @IsNumber()
   @Min(100)
   lagThresholdMeters?: number;
+
+  /** Move the scheduled start (ISO-8601). Resets the reminder ladder. */
+  @IsOptional()
+  @IsISO8601()
+  scheduledFor?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }
