@@ -227,11 +227,13 @@ jobs:
             docker compose -f config/docker/docker-compose.dev.yml --profile server up -d postgres redis
 
             echo "Applying database migrations..."
-            docker compose -f config/docker/docker-compose.dev.yml --profile server run --rm --no-deps -T -e CI=true api-dev \
+            # Disable stdin explicitly: this command runs inside an SSH heredoc,
+            # and Compose otherwise consumes the remaining deployment script.
+            docker compose -f config/docker/docker-compose.dev.yml --profile server run --rm --no-deps -T --interactive=false -e CI=true api-dev \
               sh -c 'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" npm run db:migrate'
 
             # Only replace the API after every migration has committed.
-            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --no-build --remove-orphans api-dev
+            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --no-build --force-recreate --remove-orphans api-dev
 
             # Wait for Docker's own health check to pass (port is internal, can't curl from host)
             echo "Waiting for api-dev to be healthy..."
