@@ -1,4 +1,6 @@
 import {
+  IsBoolean,
+  IsISO8601,
   IsString,
   IsOptional,
   IsNumber,
@@ -32,4 +34,17 @@ export class CreateJourneyDto {
   @IsNumber()
   @Min(100)
   lagThresholdMeters?: number;
+
+  /**
+   * Schedule the journey for a future instant (ISO-8601, UTC). The journey
+   * is created PENDING as usual; the scheduler handles reminders and start.
+   */
+  @IsOptional()
+  @IsISO8601()
+  scheduledFor?: string;
+
+  /** Scheduled journeys only: start automatically at scheduledFor. */
+  @IsOptional()
+  @IsBoolean()
+  autoStart?: boolean;
 }
