@@ -7,12 +7,13 @@ import {
   SubscribeMessage,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   ConnectedSocket,
   MessageBody,
   WsException,
 } from '@nestjs/websockets';
 import { UseFilters, Inject, forwardRef } from '@nestjs/common';
-import { Server, Socket } from 'socket.io';
+import { ExtendedError, Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
 import { FirebaseService } from '../../shared/firebase/firebase.service';
@@ -31,6 +32,26 @@ import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { NotificationService } from '../notification/notification.service';
 import { LagSeverity } from '../../types/notification.type';
 
+type SocketAuthErrorCode =
+  | 'TOKEN_EXPIRED'
+  | 'TOKEN_REVOKED'
+  | 'AUTH_TEMPORARILY_UNAVAILABLE'
+  | 'AUTH_FAILED';
+
+interface SocketAuthErrorData {
+  code: SocketAuthErrorCode;
+  message: string;
+}
+
+function createSocketAuthError(
+  code: SocketAuthErrorCode,
+  message: string,
+): ExtendedError {
+  const error = new Error(message) as ExtendedError;
+  error.data = { code, message } satisfies SocketAuthErrorData;
+  return error;
+}
+
 @WebSocketGateway({
   cors: { origin: '*' },
   namespace: '/location',
@@ -38,7 +59,7 @@ import { LagSeverity } from '../../types/notification.type';
 })
 @UseFilters(new WsExceptionFilter())
 export class LocationGateway
-  implements OnGatewayConnection, OnGatewayDisconnect
+  implements OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect
 {
   @WebSocketServer()
   server: Server;
@@ -63,29 +84,85 @@ export class LocationGateway
     private notificationService: NotificationService,
   ) {}
 
+  afterInit(server: Server) {
+    // Authenticate before Socket.IO emits "connect" to the client. Verifying
+    // inside handleConnection briefly reported success before an expired token
+    // was rejected with a terminal "io server disconnect", preventing the
+    // mobile client from refreshing and retrying the handshake.
+    server.use((client, next) => {
+      void this.authenticateSocket(client, next);
+    });
+  }
+
+  private async authenticateSocket(
+    client: Socket,
+    next: (error?: ExtendedError) => void,
+  ): Promise<void> {
+    const authToken = client.handshake.auth.token;
+    const authorization = client.handshake.headers.authorization;
+    const headerToken =
+      typeof authorization === 'string'
+        ? authorization.split(' ')[1]
+        : undefined;
+    const token = typeof authToken === 'string' ? authToken : headerToken;
+
+    if (!token) {
+      next(
+        createSocketAuthError('AUTH_FAILED', 'Authentication token required'),
+      );
+      return;
+    }
+
+    try {
+      const decodedToken = await this.firebaseService.auth.verifyIdToken(token);
+      client.data.userId = decodedToken.uid;
+      client.data.email = decodedToken.email;
+      next();
+    } catch (error) {
+      const firebaseCode =
+        (error as { errorInfo?: { code?: string }; code?: string }).errorInfo
+          ?.code ?? (error as { code?: string }).code;
+
+      let code: SocketAuthErrorCode = 'AUTH_FAILED';
+      let message = 'Authentication failed';
+
+      if (firebaseCode === 'auth/id-token-expired') {
+        code = 'TOKEN_EXPIRED';
+        message = 'Token expired, please refresh';
+      } else if (firebaseCode === 'auth/id-token-revoked') {
+        code = 'TOKEN_REVOKED';
+        message = 'Token revoked, please sign in again';
+      } else if (
+        firebaseCode === 'app/network-error' ||
+        firebaseCode === 'app/network-timeout' ||
+        firebaseCode === 'auth/internal-error'
+      ) {
+        code = 'AUTH_TEMPORARILY_UNAVAILABLE';
+        message = 'Authentication service temporarily unavailable';
+      }
+
+      this.logger.warn('WebSocket authentication rejected', 'LocationGateway', {
+        code,
+        firebaseCode: firebaseCode ?? 'unknown',
+      });
+      next(createSocketAuthError(code, message));
+    }
+  }
+
   /**
    * Handle new WebSocket connection
    */
   async handleConnection(client: Socket) {
     try {
-      // Extract token from handshake
-      const token =
-        client.handshake.auth.token ||
-        client.handshake.headers.authorization?.split(' ')[1];
-
-      if (!token) {
-        client.emit('error', { message: 'No authentication token provided' });
-        client.disconnect();
+      const userId = client.data.userId as string | undefined;
+      if (!userId) {
+        client.emit('error', {
+          code: 'AUTH_FAILED',
+          message: 'Authenticated user context missing',
+        });
+        client.disconnect(true);
         return;
       }
-
-      // Verify Firebase token
-      const decodedToken = await this.firebaseService.auth.verifyIdToken(token);
-      const userId = decodedToken.uid;
-
-      // Store user info in socket data
-      client.data.userId = userId;
-      client.data.email = decodedToken.email;
 
       // Map socket to user in Redis
       await this.redisService.setSocketUser(client.id, userId);
@@ -106,9 +183,16 @@ export class LocationGateway
       // Start heartbeat monitoring
       this.startHeartbeatMonitoring(client);
     } catch (error) {
-      console.error('Connection authentication failed:', error);
-      client.emit('error', { message: 'Authentication failed' });
-      client.disconnect();
+      this.logger.error(
+        'WebSocket connection setup failed',
+        error instanceof Error ? error.stack : undefined,
+        'LocationGateway',
+      );
+      client.emit('error', {
+        code: 'CONNECTION_SETUP_FAILED',
+        message: 'Unable to initialize live connection',
+      });
+      client.disconnect(true);
     }
   }
 
