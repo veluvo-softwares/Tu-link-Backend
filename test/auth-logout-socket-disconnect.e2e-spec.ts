@@ -161,6 +161,15 @@ describe('auth.logout -> LocationGateway force-disconnect (e2e)', () => {
     firebaseServiceStub = {
       auth: {
         verifyIdToken: jest.fn((token: string) => {
+          if (token === 'expired-token') {
+            const expiredError = new Error(
+              'Firebase ID token expired',
+            ) as Error & {
+              errorInfo: { code: string };
+            };
+            expiredError.errorInfo = { code: 'auth/id-token-expired' };
+            return Promise.reject(expiredError);
+          }
           const uid = tokenToUid.get(token);
           if (!uid) {
             return Promise.reject(new Error('unknown test token'));
@@ -307,6 +316,50 @@ describe('auth.logout -> LocationGateway force-disconnect (e2e)', () => {
       .post('/auth/logout')
       .set('Authorization', `Bearer ${token}`);
   }
+
+  it('SOCK-AUTH-01: rejects an expired token during the handshake with a structured connect_error', async () => {
+    const client = io(`${baseUrl}/location`, {
+      transports: ['websocket'],
+      auth: { token: 'expired-token' },
+      forceNew: true,
+      reconnection: false,
+      autoConnect: false,
+    });
+    clients.push(client);
+
+    let connected = false;
+    client.on('connect', () => {
+      connected = true;
+    });
+
+    const error = await new Promise<
+      Error & { data?: { code?: string; message?: string } }
+    >((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(new Error('timed out waiting for connect_error')),
+        5000,
+      );
+      client.once(
+        'connect_error',
+        (
+          connectError: Error & {
+            data?: { code?: string; message?: string };
+          },
+        ) => {
+          clearTimeout(timer);
+          resolve(connectError);
+        },
+      );
+      client.connect();
+    });
+
+    expect(connected).toBe(false);
+    expect(client.connected).toBe(false);
+    expect(error.data).toEqual({
+      code: 'TOKEN_EXPIRED',
+      message: 'Token expired, please refresh',
+    });
+  });
 
   // --- SOCK-01 + SOCK-04: room-scoped disconnect via the real event bus ---
 
