@@ -62,9 +62,23 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Sequence number management
-  async getNextSequence(journeyId: string): Promise<number> {
+  async getNextSequence(
+    journeyId: string,
+    durableFloor: number = 0,
+  ): Promise<number> {
     const key = `journey:${journeyId}:seq`;
-    return await this.client.incr(key);
+    // Keep the Redis counter above the durable Postgres maximum. The Lua
+    // script makes recovery after Redis loss atomic across API instances.
+    const result = await this.client.eval(
+      `local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+       local floor = tonumber(ARGV[1])
+       if current < floor then redis.call('SET', KEYS[1], floor) end
+       return redis.call('INCR', KEYS[1])`,
+      1,
+      key,
+      durableFloor.toString(),
+    );
+    return Number(result);
   }
 
   async getLastAcknowledgedSequence(participantId: string): Promise<number> {

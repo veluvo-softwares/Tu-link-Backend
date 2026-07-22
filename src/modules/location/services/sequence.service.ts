@@ -1,15 +1,24 @@
 import { Injectable } from '@nestjs/common';
 import { RedisService } from '../../../shared/redis/redis.service';
+import { LocationRepository } from '../../../database/repositories/location.repository';
 
 @Injectable()
 export class SequenceService {
-  constructor(private redisService: RedisService) {}
+  constructor(
+    private redisService: RedisService,
+    private locationRepository: LocationRepository,
+  ) {}
 
   /**
    * Generate next sequence number for a journey
    */
   async getNextSequence(journeyId: string): Promise<number> {
-    return await this.redisService.getNextSequence(journeyId);
+    const sequenceKey = `journey:${journeyId}:seq`;
+    const exists = await this.redisService.getClient().exists(sequenceKey);
+    const durableFloor = exists
+      ? 0
+      : await this.locationRepository.getMaxSequence(journeyId);
+    return await this.redisService.getNextSequence(journeyId, durableFloor);
   }
 
   /**

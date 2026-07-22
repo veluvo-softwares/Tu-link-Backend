@@ -57,6 +57,8 @@ describe('LocationService - Redis/Postgres', () => {
   beforeEach(async () => {
     const mockLocationRepository = {
       append: jest.fn().mockResolvedValue(undefined),
+      appendIdempotent: jest.fn().mockResolvedValue(true),
+      getMaxSequence: jest.fn().mockResolvedValue(42),
       getLatestPerParticipant: jest.fn().mockResolvedValue([]),
       getParticipantHistory: jest.fn().mockResolvedValue([]),
       getSinceSequence: jest.fn().mockResolvedValue([]),
@@ -101,6 +103,11 @@ describe('LocationService - Redis/Postgres', () => {
               { ...mockParticipant, userId: 'user-456', id: 'participant-456' },
             ]),
             isActiveParticipant: jest.fn().mockResolvedValue(true),
+            getParticipant: jest.fn().mockResolvedValue({
+              ...mockParticipant,
+              userId: 'user-123',
+              joinedAt: new Date(Date.now() - 60000),
+            }),
           },
         },
         {
@@ -194,57 +201,15 @@ describe('LocationService - Redis/Postgres', () => {
       );
     });
 
-    it('should not throw when location persistence fails', async () => {
-      // Mock the repository append to reject
+    it('should not acknowledge when durable persistence fails', async () => {
       locationRepository.append.mockRejectedValueOnce(
         new Error('Postgres connection failed'),
       );
-
-      // Mock console.error to verify logging
-      const consoleSpy = jest
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
-      const result = await service.processLocationUpdate(
-        'user-123',
-        mockLocationDto,
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.sequenceNumber).toBe(42);
-
-      // Flush the microtask queue so the rejected persist promise's .catch runs
-      // (deterministic — no arbitrary timer that can flake on slow CI).
-      await new Promise((resolve) => setImmediate(resolve));
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Location persist failed for user user-123'),
-        expect.anything(),
-      );
-
-      consoleSpy.mockRestore();
-    });
-
-    it('should log location persist failures with userId', async () => {
-      locationRepository.append.mockRejectedValueOnce(
-        new Error('Database timeout'),
-      );
-
-      const consoleSpy = jest
-        .spyOn(console, 'error')
-        .mockImplementation(() => {});
-
-      await service.processLocationUpdate('user-456', mockLocationDto);
-
-      // Flush the microtask queue so the rejected persist promise's .catch runs.
-      await new Promise((resolve) => setImmediate(resolve));
-
-      expect(consoleSpy).toHaveBeenCalledWith(
-        'Location persist failed for user user-456: Database timeout',
-        expect.anything(),
-      );
-
-      consoleSpy.mockRestore();
+      await expect(
+        service.processLocationUpdate('user-123', mockLocationDto),
+      ).rejects.toThrow('Postgres connection failed');
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      expect(redisService.cacheLocation as jest.Mock).not.toHaveBeenCalled();
     });
 
     it('should cache the LocationUpdate with nested location for snapshots', async () => {
@@ -307,6 +272,82 @@ describe('LocationService - Redis/Postgres', () => {
         'lag',
         'arrival',
       ]);
+    });
+  });
+
+  describe('processBackfill', () => {
+    it('durably acknowledges accepted and duplicate client point ids', async () => {
+      const now = Date.now();
+      sequenceService.getNextSequence
+        .mockResolvedValueOnce(43)
+        .mockResolvedValueOnce(44);
+      locationRepository.appendIdempotent
+        .mockResolvedValueOnce(true)
+        .mockResolvedValueOnce(false);
+
+      const ack = await service.processBackfill('user-123', {
+        journeyId: 'journey-123',
+        batchId: 'batch-1',
+        points: [
+          {
+            clientPointId: 'point-1',
+            recordedAt: now - 2000,
+            location: { latitude: 40.7128, longitude: -74.006 },
+            accuracy: 10,
+          },
+          {
+            clientPointId: 'point-2',
+            recordedAt: now - 1000,
+            location: { latitude: 40.713, longitude: -74.005 },
+            accuracy: 8,
+          },
+        ],
+      });
+
+      expect(ack).toEqual(
+        expect.objectContaining({
+          batchId: 'batch-1',
+          acknowledgedPointIds: ['point-1', 'point-2'],
+          acceptedPointIds: ['point-1'],
+          duplicatePointIds: ['point-2'],
+          rejected: [],
+          nextSequence: 43,
+        }),
+      );
+      expect(
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        locationRepository.appendIdempotent as jest.Mock,
+      ).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientPointId: 'point-1',
+          backfilled: true,
+          recordedAt: new Date(now - 2000),
+        }),
+      );
+    });
+
+    it('does not acknowledge an impossible future point', async () => {
+      const ack = await service.processBackfill('user-123', {
+        journeyId: 'journey-123',
+        batchId: 'batch-future',
+        points: [
+          {
+            clientPointId: 'future-point',
+            recordedAt: Date.now() + 10 * 60 * 1000,
+            location: { latitude: 40.7128, longitude: -74.006 },
+            accuracy: 10,
+          },
+        ],
+      });
+
+      expect(ack.acknowledgedPointIds).toEqual([]);
+      expect(ack.rejected).toEqual([
+        { clientPointId: 'future-point', reason: 'POINT_IN_FUTURE' },
+      ]);
+      expect(
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        locationRepository.appendIdempotent as jest.Mock,
+      ).not.toHaveBeenCalled();
     });
   });
 });

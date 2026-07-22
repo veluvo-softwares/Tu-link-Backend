@@ -26,6 +26,11 @@ import {
 } from './services/arrival-detection.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 import {
+  LocationBackfillAck,
+  LocationBackfillDto,
+  LocationBackfillPointDto,
+} from './dto/location-backfill.dto';
+import {
   LocationUpdate,
   LocationHistory,
   LocationHistoryResponse,
@@ -163,16 +168,21 @@ export class LocationService {
       participantId: participant.id,
       sequenceNumber,
       priority,
-      timestamp: Date.now(),
+      timestamp: locationUpdateDto.timestamp,
     };
 
-    // 10. Persist to Postgres (history) - fire-and-forget
-    this.persistLocation(locationUpdate).catch((err: Error) =>
-      console.error(
-        `Location persist failed for user ${userId}: ${err.message}`,
-        err.stack,
-      ),
-    );
+    // 10. Persist before acknowledging or updating the live cache. A client
+    // must be able to remove its locally queued point after the ack without a
+    // Postgres failure creating a permanent history hole.
+    const inserted = await this.persistLocation(locationUpdate);
+    if (!inserted) {
+      return {
+        success: true,
+        sequenceNumber,
+        priority,
+        shouldBroadcast: false,
+      };
+    }
 
     // 11. Update Redis cache — the single source of truth for live convoy
     // positions and the snapshot returned to clients on join. Must be awaited
@@ -227,10 +237,10 @@ export class LocationService {
 
   /**
    * Persists location to Postgres for history and analytics.
-   * Called asynchronously — failures are logged but do not affect the live update response.
+   * Awaited by the live path so an acknowledgement means durable history.
    */
-  private async persistLocation(update: LocationUpdate): Promise<void> {
-    await this.locationRepository.append({
+  private async persistLocation(update: LocationUpdate): Promise<boolean> {
+    const input = {
       journeyId: update.journeyId,
       participantId: update.participantId,
       location: update.location,
@@ -244,12 +254,20 @@ export class LocationService {
         batteryLevel: update.metadata?.batteryLevel,
         isMoving: update.metadata?.isMoving || false,
       },
-    });
+      recordedAt: new Date(update.timestamp),
+      receivedAt: new Date(),
+      clientPointId: update.clientPointId,
+      backfilled: update.metadata?.backfilled ?? false,
+    };
+    if (update.clientPointId) {
+      return this.locationRepository.appendIdempotent(input);
+    }
+    await this.locationRepository.append(input);
+    return true;
   }
 
-  // Maps a Postgres location row to the API LocationHistory shape. createdAt
-  // becomes `timestamp` (ISO on serialization); participantId doubles as userId
-  // (invariant A).
+  // Maps a Postgres location row to the API LocationHistory shape. recordedAt
+  // is the real GPS event time; receivedAt is retained for audit.
   private recordToHistory(record: LocationRecord): LocationHistory {
     return {
       id: String(record.id),
@@ -261,12 +279,14 @@ export class LocationService {
       heading: record.heading ?? undefined,
       speed: record.speed ?? undefined,
       altitude: record.altitude ?? undefined,
-      timestamp: record.createdAt,
+      timestamp: record.recordedAt,
+      receivedAt: record.receivedAt,
       sequenceNumber: record.sequenceNumber ?? 0,
       priority: record.priority,
       metadata: {
         batteryLevel: record.metadata?.batteryLevel,
         isMoving: record.metadata?.isMoving ?? false,
+        backfilled: record.backfilled,
       },
     } as unknown as LocationHistory;
   }
@@ -345,18 +365,59 @@ export class LocationService {
     const journey = await this.journeyService.findById(journeyId);
     const locations: Record<string, LocationUpdate> = {};
 
-    // Read the latest cached position for each participant from Redis — the
-    // single source of truth for live convoy positions.
-    const participants =
-      await this.redisService.getJourneyParticipants(journeyId);
+    // Membership is durable in Postgres. Redis can restart or expire without
+    // making an active participant disappear from the convoy snapshot.
+    const participants = (
+      await this.participantService.getJourneyParticipants(journeyId)
+    ).filter(
+      (participant) =>
+        participant.role === 'LEADER' ||
+        ['ACTIVE', 'ACCEPTED', 'ARRIVED'].includes(participant.status),
+    );
+    const durableLatest =
+      await this.locationRepository.getLatestPerParticipant(journeyId);
+    const durableByParticipant = new Map(
+      durableLatest.map((record) => [record.participantId, record]),
+    );
 
-    for (const participantId of participants) {
+    for (const participant of participants) {
+      const participantId = participant.userId;
       const location = await this.redisService.getCachedLocation(
         journeyId,
         participantId,
       );
       if (location) {
-        locations[participantId] = location;
+        locations[participantId] = {
+          ...location,
+          positionRecordedAt: location.timestamp,
+          connectionState: participant.connectionStatus,
+          lastSeenAt: participant.lastSeenAt?.getTime(),
+        };
+        continue;
+      }
+
+      const durable = durableByParticipant.get(participantId);
+      if (durable) {
+        locations[participantId] = {
+          journeyId,
+          participantId,
+          location: durable.location,
+          accuracy: durable.accuracy ?? 0,
+          heading: durable.heading ?? undefined,
+          speed: durable.speed ?? undefined,
+          altitude: durable.altitude ?? undefined,
+          timestamp: durable.recordedAt.getTime(),
+          positionRecordedAt: durable.recordedAt.getTime(),
+          sequenceNumber: durable.sequenceNumber ?? 0,
+          priority: durable.priority,
+          connectionState: participant.connectionStatus,
+          lastSeenAt: participant.lastSeenAt?.getTime(),
+          metadata: {
+            batteryLevel: durable.metadata?.batteryLevel,
+            isMoving: durable.metadata?.isMoving ?? false,
+            backfilled: durable.backfilled,
+          },
+        };
       }
     }
 
@@ -454,7 +515,12 @@ export class LocationService {
     userId: string,
     journeyId: string,
     fromSequence: number,
-  ): Promise<LocationHistory[]> {
+    requestedLimit: number = 500,
+  ): Promise<{
+    updates: LocationHistory[];
+    nextSequence: number;
+    hasMore: boolean;
+  }> {
     const isParticipant = await this.participantService.isParticipant(
       journeyId,
       userId,
@@ -463,12 +529,228 @@ export class LocationService {
       throw new ForbiddenException('Not a participant');
     }
 
-    // Get all locations after the specified sequence number
+    const limit = Math.min(Math.max(requestedLimit, 1), 500);
+    // Fetch one extra row to tell the client whether another page is needed.
     const records = await this.locationRepository.getSinceSequence(
       journeyId,
       fromSequence,
+      limit + 1,
     );
-    return records.map((r) => this.recordToHistory(r));
+    const hasMore = records.length > limit;
+    const page = hasMore ? records.slice(0, limit) : records;
+    const updates = page.map((record) => this.recordToHistory(record));
+    return {
+      updates,
+      nextSequence:
+        page.length > 0
+          ? (page[page.length - 1].sequenceNumber ?? fromSequence)
+          : fromSequence,
+      hasMore,
+    };
+  }
+
+  /**
+   * Persist an offline trail exactly once. This deliberately bypasses live
+   * throttling/rate limiting, but applies separate batch and time-window
+   * limits. Each insert is awaited before it can be acknowledged.
+   */
+  async processBackfill(
+    userId: string,
+    dto: LocationBackfillDto,
+  ): Promise<LocationBackfillAck> {
+    const maxPoints =
+      this.configService.get<number>('app.backfillMaxPoints') ?? 200;
+    if (dto.points.length > maxPoints) {
+      throw new BadRequestException(
+        `Backfill batch exceeds ${maxPoints} points`,
+      );
+    }
+
+    const backfillRateLimit =
+      this.configService.get<number>('app.backfillBatchRateLimit') ?? 30;
+    const withinBackfillRate = await this.redisService.checkRateLimit(
+      `ratelimit:location-backfill:${userId}`,
+      backfillRateLimit,
+      60,
+    );
+    if (!withinBackfillRate) {
+      throw new BadRequestException('Backfill rate limit exceeded');
+    }
+
+    const journey = await this.journeyService.findById(dto.journeyId);
+    const participant = await this.participantService.getParticipant(
+      dto.journeyId,
+      userId,
+    );
+    if (!participant || !participant.joinedAt) {
+      throw new ForbiddenException('Not a joined participant of this journey');
+    }
+
+    const now = Date.now();
+    const completionGraceMs =
+      (this.configService.get<number>('app.backfillCompletionGraceHours') ??
+        24) *
+      60 *
+      60 *
+      1000;
+    const completedWithinGrace =
+      journey.status === 'COMPLETED' &&
+      journey.endTime != null &&
+      now - journey.endTime.getTime() <= completionGraceMs;
+    if (journey.status !== 'ACTIVE' && !completedWithinGrace) {
+      throw new BadRequestException('Journey is not accepting backfill');
+    }
+
+    const acknowledgedPointIds: string[] = [];
+    const acceptedPointIds: string[] = [];
+    const duplicatePointIds: string[] = [];
+    const rejected: Array<{ clientPointId: string; reason: string }> = [];
+    const maxAgeMs =
+      (this.configService.get<number>('app.backfillMaxPointAgeDays') ?? 7) *
+      24 *
+      60 *
+      60 *
+      1000;
+    const futureSkewMs =
+      (this.configService.get<number>('app.backfillFutureSkewSeconds') ?? 300) *
+      1000;
+    const journeyStartFloor = journey.startTime
+      ? journey.startTime.getTime() - 5 * 60 * 1000
+      : now - maxAgeMs;
+    const journeyEndCeiling = journey.endTime
+      ? journey.endTime.getTime() + futureSkewMs
+      : now + futureSkewMs;
+
+    let newestAccepted: LocationBackfillPointDto | null = null;
+    let nextSequence = 0;
+
+    // Client order is not trusted. Sequence valid history by event time so a
+    // malformed/replayed payload cannot create an internally reversed page.
+    const orderedPoints = [...dto.points].sort(
+      (left, right) => left.recordedAt - right.recordedAt,
+    );
+    const seenPointIds = new Set<string>();
+    for (const point of orderedPoints) {
+      const invalidReason = this.validateBackfillTimestamp(
+        point.recordedAt,
+        now,
+        maxAgeMs,
+        futureSkewMs,
+        journeyStartFloor,
+        journeyEndCeiling,
+      );
+      if (invalidReason) {
+        rejected.push({
+          clientPointId: point.clientPointId,
+          reason: invalidReason,
+        });
+        continue;
+      }
+      if (seenPointIds.has(point.clientPointId)) {
+        duplicatePointIds.push(point.clientPointId);
+        acknowledgedPointIds.push(point.clientPointId);
+        continue;
+      }
+      seenPointIds.add(point.clientPointId);
+
+      const sequenceNumber = await this.sequenceService.getNextSequence(
+        dto.journeyId,
+      );
+      const inserted = await this.locationRepository.appendIdempotent({
+        journeyId: dto.journeyId,
+        participantId: userId,
+        location: point.location,
+        accuracy: point.accuracy,
+        heading: point.heading,
+        speed: point.speed,
+        altitude: point.altitude,
+        sequenceNumber,
+        priority: 'LOW',
+        recordedAt: new Date(point.recordedAt),
+        receivedAt: new Date(),
+        clientPointId: point.clientPointId,
+        backfilled: true,
+        metadata: {
+          batteryLevel: point.metadata?.batteryLevel,
+          isMoving: point.metadata?.isMoving ?? false,
+          backfilled: true,
+        },
+      });
+
+      acknowledgedPointIds.push(point.clientPointId);
+      if (inserted) {
+        acceptedPointIds.push(point.clientPointId);
+        nextSequence = Math.max(nextSequence, sequenceNumber);
+        if (
+          newestAccepted == null ||
+          point.recordedAt > newestAccepted.recordedAt
+        ) {
+          newestAccepted = point;
+        }
+      } else {
+        duplicatePointIds.push(point.clientPointId);
+      }
+    }
+
+    // Historical points are never rebroadcast. During an active journey only,
+    // refresh the live cache from the newest accepted sample if it is newer.
+    if (journey.status === 'ACTIVE' && newestAccepted) {
+      const cached = await this.redisService.getCachedLocation(
+        dto.journeyId,
+        userId,
+      );
+      if (!cached || newestAccepted.recordedAt > cached.timestamp) {
+        await this.redisService.cacheLocation(dto.journeyId, userId, {
+          journeyId: dto.journeyId,
+          participantId: userId,
+          location: newestAccepted.location,
+          accuracy: newestAccepted.accuracy,
+          heading: newestAccepted.heading,
+          speed: newestAccepted.speed,
+          altitude: newestAccepted.altitude,
+          timestamp: newestAccepted.recordedAt,
+          positionRecordedAt: newestAccepted.recordedAt,
+          sequenceNumber: nextSequence || undefined,
+          priority: 'LOW',
+          metadata: {
+            batteryLevel: newestAccepted.metadata?.batteryLevel,
+            isMoving: newestAccepted.metadata?.isMoving ?? false,
+            backfilled: true,
+          },
+        });
+      }
+    }
+
+    if (nextSequence === 0) {
+      nextSequence = await this.locationRepository.getMaxSequence(
+        dto.journeyId,
+      );
+    }
+
+    return {
+      batchId: dto.batchId,
+      acknowledgedPointIds,
+      acceptedPointIds,
+      duplicatePointIds,
+      rejected,
+      nextSequence,
+    };
+  }
+
+  private validateBackfillTimestamp(
+    recordedAt: number,
+    now: number,
+    maxAgeMs: number,
+    futureSkewMs: number,
+    journeyStartFloor: number,
+    journeyEndCeiling: number,
+  ): string | null {
+    if (!Number.isFinite(recordedAt)) return 'INVALID_TIMESTAMP';
+    if (recordedAt < now - maxAgeMs) return 'POINT_TOO_OLD';
+    if (recordedAt > now + futureSkewMs) return 'POINT_IN_FUTURE';
+    if (recordedAt < journeyStartFloor) return 'BEFORE_JOURNEY_START';
+    if (recordedAt > journeyEndCeiling) return 'AFTER_JOURNEY_END';
+    return null;
   }
 
   /**

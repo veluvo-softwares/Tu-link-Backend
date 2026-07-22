@@ -1,5 +1,6 @@
 import {
   bigint,
+  boolean,
   doublePrecision,
   foreignKey,
   index,
@@ -7,8 +8,10 @@ import {
   pgTable,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { geographyPoint } from './columns/geography-point';
 import { priorityEnum } from './enums';
 import { journeys } from './journeys';
@@ -17,6 +20,7 @@ import { participants } from './participants';
 export interface LocationMetadata {
   batteryLevel?: number;
   isMoving?: boolean;
+  backfilled?: boolean;
 }
 
 // LOCATIONS — high-write append log; live reads still come from Redis.
@@ -40,6 +44,16 @@ export const locations = pgTable(
     sequenceNumber: bigint('sequence_number', { mode: 'number' }),
     priority: priorityEnum('priority').notNull().default('LOW'),
     metadata: jsonb('metadata').$type<LocationMetadata>().notNull().default({}),
+    // Event time reported by the GPS sample. This is distinct from ingestion
+    // time so an offline trail keeps its real chronology after backfill.
+    recordedAt: timestamp('recorded_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    receivedAt: timestamp('received_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    clientPointId: text('client_point_id'),
+    backfilled: boolean('backfilled').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -55,6 +69,14 @@ export const locations = pgTable(
       t.createdAt.desc(),
     ),
     index('idx_loc_seq').on(t.journeyId, t.sequenceNumber),
+    index('idx_loc_recorded').on(
+      t.journeyId,
+      t.participantId,
+      t.recordedAt.desc(),
+    ),
+    uniqueIndex('idx_loc_client_point')
+      .on(t.journeyId, t.participantId, t.clientPointId)
+      .where(sql`client_point_id IS NOT NULL`),
     // Optional once spatial history queries appear:
     // index('idx_loc_geo').using('gist', t.location),
   ],
