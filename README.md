@@ -70,10 +70,11 @@ deployed server:
   the internal Docker network (`REDIS_HOST=redis:6379`). Redis still functions
   exactly the same — it's just not exposed on the droplet's host interface.
 
-### Deploy Updates
-```bash
-./deploy.sh
-```
+### Deploy updates
+
+Push reviewed changes to `dev`. The GitHub Actions CI/CD workflow validates
+migrations, builds the release, applies migrations on the droplet before API
+cutover, and verifies the public health endpoint.
 
 ## 📋 Core Features
 
@@ -365,12 +366,8 @@ This app is **deployment-ready** for DigitalOcean droplets and other cloud provi
 - Firebase project with valid credentials
 - Environment variables configured
 
-### Quick Deployment
+### Build locally
 ```bash
-# Simple deployment script (development environment)
-./deploy.sh
-
-# Build and run manually
 npm run build
 npm run start:prod
 ```
@@ -385,12 +382,11 @@ docker build -f config/docker/Dockerfile -t tulink-backend .
 docker run -p 3000:3000 --env-file .env tulink-backend
 ```
 
-### DigitalOcean Droplet Setup
-1. Create droplet with Node.js 20+
-2. Copy `.env.example` to `.env` and configure
-3. Run `./deploy.sh` or use Docker
-4. Configure reverse proxy (nginx) for SSL
-5. Set up Redis instance
+### DigitalOcean deployment
+
+The development droplet is deployed only by `.github/workflows/ci.yml` after a
+successful push to `dev`. See
+[`docs/DEPLOYMENT_INSTRUCTIONS.md`](./docs/DEPLOYMENT_INSTRUCTIONS.md).
 
 ### Environment Configuration
 Ensure all environment variables from `.env.example` are set in your production environment.

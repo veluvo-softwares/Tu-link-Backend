@@ -1,4 +1,5 @@
 import { Priority } from '../../types/priority.type';
+import { ConnectionStatus } from '../../types/participant-status.type';
 
 export interface LocationHistory {
   id: string;
@@ -11,11 +12,13 @@ export interface LocationHistory {
   speed?: number;
   altitude?: number;
   timestamp: Date;
+  receivedAt?: Date;
   sequenceNumber: number;
   priority: Priority;
   metadata: {
     batteryLevel?: number;
     isMoving: boolean;
+    backfilled?: boolean;
   };
 }
 
@@ -31,12 +34,17 @@ export interface LocationUpdate {
   speed?: number;
   altitude?: number;
   timestamp: number;
+  clientPointId?: string;
+  positionRecordedAt?: number;
+  connectionState?: ConnectionStatus;
+  lastSeenAt?: number;
   sequenceNumber?: number;
   priority?: Priority;
   metadata?: {
     batteryLevel?: number;
     isMoving?: boolean;
     statusChange?: boolean;
+    backfilled?: boolean;
   };
 }
 
@@ -52,12 +60,17 @@ export interface CachedLocation {
   speed?: number;
   altitude?: number;
   timestamp: number;
+  clientPointId?: string;
+  positionRecordedAt?: number;
+  connectionState?: ConnectionStatus;
+  lastSeenAt?: number;
   sequenceNumber?: number;
   priority?: Priority;
   metadata?: {
     batteryLevel?: number;
     isMoving?: boolean;
     statusChange?: boolean;
+    backfilled?: boolean;
   };
 }
 

@@ -28,6 +28,7 @@ import { WebSocketMetricsService } from './services/websocket-metrics.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
 import { AcknowledgeDto } from './dto/acknowledge.dto';
 import { ResyncDto } from './dto/resync.dto';
+import { LocationBackfillDto } from './dto/location-backfill.dto';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { NotificationService } from '../notification/notification.service';
 import { LagSeverity } from '../../types/notification.type';
@@ -208,9 +209,17 @@ export class LocationGateway
     // Clear heartbeat timers
     this.stopHeartbeatMonitoring(client.id);
 
-    // Update connection status in Redis
+    // Presence is a user-level aggregate. One socket disappearing must not
+    // mark the user offline while another phone/session remains connected.
+    let hasAnotherUserSocket = false;
     if (userId) {
-      await this.redisService.setConnectionStatus(userId, false);
+      const userSockets = await this.server.in(`user:${userId}`).fetchSockets();
+      hasAnotherUserSocket = userSockets.some(
+        (socket) => socket.id !== client.id,
+      );
+      if (!hasAnotherUserSocket) {
+        await this.redisService.setConnectionStatus(userId, false);
+      }
     }
 
     // Remove from journey room
@@ -218,23 +227,53 @@ export class LocationGateway
       await this.redisService.removeSocketFromRoom(journeyId, client.id);
       void client.leave(`journey:${journeyId}`);
 
-      // Update participant connection status
+      const journeySockets = await this.server
+        .in(`journey:${journeyId}`)
+        .fetchSockets();
+      const hasAnotherJourneySocket = journeySockets.some(
+        (socket) => socket.id !== client.id && socket.data.userId === userId,
+      );
+
+      // Update participant connection status only when the user's last socket
+      // for this journey has gone away.
       if (userId) {
+        if (hasAnotherJourneySocket) {
+          await this.redisService.deleteSocketUser(client.id);
+          return;
+        }
+
+        const journey = await this.journeyService.findById(journeyId);
+        const isRetryableJourneyLoss =
+          journey.status === 'ACTIVE' &&
+          client.data.terminalDisconnect !== true;
+        const connectionState = isRetryableJourneyLoss
+          ? 'RECONNECTING'
+          : 'DISCONNECTED';
         await this.participantService.updateConnectionStatus(
           journeyId,
           userId,
-          'DISCONNECTED',
+          connectionState,
         );
 
-        // Notify other participants. The member's last cached position remains
-        // in Redis (5-min TTL) so peers keep seeing where they dropped off; the
-        // participant-disconnected event tells clients to mark them stale.
+        const changedAt = Date.now();
         this.server
           .to(`journey:${journeyId}`)
-          .emit('participant-disconnected', {
+          .emit('participant-connection-changed', {
             userId,
-            timestamp: Date.now(),
+            state: connectionState,
+            lastSeenAt: changedAt,
           });
+
+        // Compatibility event for clients predating the explicit presence
+        // model. Remove after the offline-capable client is the minimum version.
+        if (connectionState === 'RECONNECTING') {
+          this.server
+            .to(`journey:${journeyId}`)
+            .emit('participant-disconnected', {
+              userId,
+              timestamp: changedAt,
+            });
+        }
       }
     }
 
@@ -270,6 +309,9 @@ export class LocationGateway
       // sockets actually torn down. The fetchSockets() result is the set of
       // sockets targeted for disconnect, not a post-disconnect confirmation.
       const sockets = await this.server.in(room).fetchSockets();
+      for (const socket of sockets) {
+        socket.data.terminalDisconnect = true;
+      }
       this.server.in(room).disconnectSockets(true);
       await this.webSocketMetricsService.recordForceDisconnect(
         payload.uid,
@@ -663,6 +705,7 @@ export class LocationGateway
 
     // Send immediate acknowledgment to sender
     client.emit('location-update-ack', {
+      clientPointId: payload.clientPointId,
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
       timestamp: Date.now(),
@@ -682,7 +725,8 @@ export class LocationGateway
         // Real epoch-ms timestamp so clients can compute freshness/staleness.
         // (Previously this was the sequence number, which made every peer
         // position look ~56 years old and therefore permanently "stale".)
-        timestamp: Date.now(),
+        timestamp: payload.timestamp,
+        receivedAt: Date.now(),
         sequenceNumber: result.sequenceNumber,
         priority: result.priority,
         metadata: payload.metadata,
@@ -716,7 +760,8 @@ export class LocationGateway
       altitude: payload.altitude,
       // Real epoch-ms timestamp (not the sequence number) so clients can
       // compute freshness/staleness correctly.
-      timestamp: Date.now(),
+      timestamp: payload.timestamp,
+      receivedAt: Date.now(),
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
       metadata: payload.metadata,
@@ -737,6 +782,7 @@ export class LocationGateway
 
     // Send acknowledgment with batch info
     client.emit('location-update-ack', {
+      clientPointId: payload.clientPointId,
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
       timestamp: Date.now(),
@@ -766,6 +812,7 @@ export class LocationGateway
 
     // Send acknowledgment with polling instruction
     client.emit('location-update-ack', {
+      clientPointId: payload.clientPointId,
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
       timestamp: Date.now(),
@@ -823,20 +870,43 @@ export class LocationGateway
     const journeyId = client.data.journeyId;
 
     try {
-      const missingUpdates = await this.locationService.handleResyncRequest(
+      const page = await this.locationService.handleResyncRequest(
         userId,
         journeyId,
         payload.fromSequence,
+        payload.limit,
       );
 
       client.emit('resync-data', {
-        updates: missingUpdates,
-        count: missingUpdates.length,
+        updates: page.updates,
+        count: page.updates.length,
+        nextSequence: page.nextSequence,
+        hasMore: page.hasMore,
         timestamp: Date.now(),
       });
     } catch (error) {
       client.emit('error', {
         message: error.message || 'Failed to resync',
+        timestamp: Date.now(),
+      });
+    }
+  }
+
+  @SubscribeMessage('location-backfill')
+  async handleLocationBackfill(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() payload: LocationBackfillDto,
+  ) {
+    try {
+      const ack = await this.locationService.processBackfill(
+        client.data.userId,
+        payload,
+      );
+      client.emit('backfill-ack', ack);
+    } catch (error) {
+      client.emit('backfill-error', {
+        batchId: payload.batchId,
+        message: error.message || 'Failed to process location backfill',
         timestamp: Date.now(),
       });
     }

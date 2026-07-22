@@ -41,6 +41,23 @@ export default registerAs('app', () => ({
   ),
   heartbeatTimeoutMs: parseInt(process.env.HEARTBEAT_TIMEOUT_MS || '30000', 10),
   maxRetryAttempts: parseInt(process.env.MAX_RETRY_ATTEMPTS || '3', 10),
+  backfillMaxPoints: parseInt(process.env.BACKFILL_MAX_POINTS || '200', 10),
+  backfillBatchRateLimit: parseInt(
+    process.env.BACKFILL_BATCH_RATE_LIMIT || '30',
+    10,
+  ),
+  backfillMaxPointAgeDays: parseInt(
+    process.env.BACKFILL_MAX_POINT_AGE_DAYS || '7',
+    10,
+  ),
+  backfillCompletionGraceHours: parseInt(
+    process.env.BACKFILL_COMPLETION_GRACE_HOURS || '24',
+    10,
+  ),
+  backfillFutureSkewSeconds: parseInt(
+    process.env.BACKFILL_FUTURE_SKEW_SECONDS || '300',
+    10,
+  ),
   retryTimeoutMs: parseInt(process.env.RETRY_TIMEOUT_MS || '5000', 10),
   // Live-tracking broadcast throttle floors (per priority). A real >50m move
   // (MEDIUM) broadcasts immediately; minor steady-driving deltas (LOW) are
