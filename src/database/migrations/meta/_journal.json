@@ -64,6 +64,13 @@
       "when": 1784331329554,
       "tag": "0008_tranquil_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784692800000,
+      "tag": "0009_offline_location_history",
+      "breakpoints": true
     }
   ]
 }

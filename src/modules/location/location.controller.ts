@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { LocationService } from './location.service';
 import { LocationUpdateDto } from './dto/location-update.dto';
+import { LocationBackfillDto } from './dto/location-backfill.dto';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -38,10 +39,21 @@ export class LocationController {
       success: result.success,
       sequenceNumber: result.sequenceNumber,
       priority: result.priority,
+      clientPointId: locationUpdateDto.clientPointId,
       message: result.success
         ? 'Location update processed successfully'
         : 'Location update throttled',
     };
+  }
+
+  /** Durable, idempotent ingest for points captured while offline. */
+  @Post('backfill')
+  @HttpCode(HttpStatus.OK)
+  async backfillLocations(
+    @CurrentUser('uid') userId: string,
+    @Body() dto: LocationBackfillDto,
+  ) {
+    return this.locationService.processBackfill(userId, dto);
   }
 
   /**

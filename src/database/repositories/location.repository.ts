@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, max } from 'drizzle-orm';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { Priority } from '../../types/priority.type';
 import { LatLng } from '../schema/columns/geography-point';
@@ -18,6 +18,10 @@ export interface LocationRecord {
   sequenceNumber: number | null;
   priority: Priority;
   metadata: LocationMetadata;
+  recordedAt: Date;
+  receivedAt: Date;
+  clientPointId: string | null;
+  backfilled: boolean;
   createdAt: Date;
 }
 
@@ -32,6 +36,10 @@ export interface AppendLocationInput {
   sequenceNumber?: number;
   priority?: Priority;
   metadata?: LocationMetadata;
+  recordedAt?: Date;
+  receivedAt?: Date;
+  clientPointId?: string;
+  backfilled?: boolean;
 }
 
 type SelectedRow = {
@@ -47,6 +55,10 @@ type SelectedRow = {
   sequenceNumber: number | null;
   priority: Priority;
   metadata: LocationMetadata;
+  recordedAt: Date;
+  receivedAt: Date;
+  clientPointId: string | null;
+  backfilled: boolean;
   createdAt: Date;
 };
 
@@ -77,6 +89,10 @@ export class LocationRepository {
       sequenceNumber: locations.sequenceNumber,
       priority: locations.priority,
       metadata: locations.metadata,
+      recordedAt: locations.recordedAt,
+      receivedAt: locations.receivedAt,
+      clientPointId: locations.clientPointId,
+      backfilled: locations.backfilled,
       createdAt: locations.createdAt,
     };
   }
@@ -94,7 +110,52 @@ export class LocationRepository {
       sequenceNumber: input.sequenceNumber ?? 0,
       priority: input.priority ?? 'LOW',
       metadata: input.metadata ?? {},
+      recordedAt: input.recordedAt ?? new Date(),
+      receivedAt: input.receivedAt ?? new Date(),
+      clientPointId: input.clientPointId,
+      backfilled: input.backfilled ?? false,
     });
+  }
+
+  /**
+   * Append a client-identified point exactly once. Returns false when the
+   * point was already committed by an earlier delivery whose ack was lost.
+   */
+  async appendIdempotent(input: AppendLocationInput): Promise<boolean> {
+    if (!input.clientPointId) {
+      throw new Error('clientPointId is required for idempotent append');
+    }
+
+    const inserted = await this.db
+      .insert(locations)
+      .values({
+        journeyId: input.journeyId,
+        participantId: input.participantId,
+        location: geogPoint(input.location.latitude, input.location.longitude),
+        accuracy: input.accuracy,
+        heading: input.heading,
+        speed: input.speed,
+        altitude: input.altitude,
+        sequenceNumber: input.sequenceNumber ?? 0,
+        priority: input.priority ?? 'LOW',
+        metadata: input.metadata ?? {},
+        recordedAt: input.recordedAt ?? new Date(),
+        receivedAt: input.receivedAt ?? new Date(),
+        clientPointId: input.clientPointId,
+        backfilled: input.backfilled ?? false,
+      })
+      .onConflictDoNothing()
+      .returning({ id: locations.id });
+
+    return inserted.length === 1;
+  }
+
+  async getMaxSequence(journeyId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ value: max(locations.sequenceNumber) })
+      .from(locations)
+      .where(eq(locations.journeyId, journeyId));
+    return row?.value ?? 0;
   }
 
   // Latest row per participant for a journey, in one query (DISTINCT ON uses
@@ -104,7 +165,7 @@ export class LocationRepository {
       .selectDistinctOn([locations.participantId], this.selection())
       .from(locations)
       .where(eq(locations.journeyId, journeyId))
-      .orderBy(locations.participantId, desc(locations.createdAt));
+      .orderBy(locations.participantId, desc(locations.recordedAt));
     return rows.map(toRecord);
   }
 
@@ -121,7 +182,7 @@ export class LocationRepository {
           eq(locations.participantId, participantId),
         ),
       )
-      .orderBy(desc(locations.createdAt))
+      .orderBy(desc(locations.recordedAt))
       .limit(1);
     return row ? toRecord(row) : null;
   }
@@ -140,7 +201,7 @@ export class LocationRepository {
           eq(locations.participantId, participantId),
         ),
       )
-      .orderBy(desc(locations.createdAt))
+      .orderBy(desc(locations.recordedAt))
       .limit(limit);
     return rows.map(toRecord);
   }
@@ -152,7 +213,7 @@ export class LocationRepository {
       .select(this.selection())
       .from(locations)
       .where(eq(locations.journeyId, journeyId))
-      .orderBy(asc(locations.createdAt));
+      .orderBy(asc(locations.recordedAt));
     return rows.map(toRecord);
   }
 
@@ -160,6 +221,7 @@ export class LocationRepository {
   async getSinceSequence(
     journeyId: string,
     fromSequence: number,
+    limit: number = 500,
   ): Promise<LocationRecord[]> {
     const rows = await this.db
       .select(this.selection())
@@ -170,7 +232,8 @@ export class LocationRepository {
           gt(locations.sequenceNumber, fromSequence),
         ),
       )
-      .orderBy(asc(locations.sequenceNumber));
+      .orderBy(asc(locations.sequenceNumber))
+      .limit(limit);
     return rows.map(toRecord);
   }
 }

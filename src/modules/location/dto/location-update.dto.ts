@@ -3,6 +3,7 @@ import {
   IsNumber,
   IsOptional,
   IsBoolean,
+  MaxLength,
   Min,
   Max,
   ValidateNested,
@@ -66,6 +67,11 @@ export class LocationUpdateDto {
 
   @IsNumber()
   timestamp: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  clientPointId?: string;
 
   @IsOptional()
   @ValidateNested()
