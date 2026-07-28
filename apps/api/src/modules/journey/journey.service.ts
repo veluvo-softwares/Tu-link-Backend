@@ -21,6 +21,7 @@ import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { Journey } from '../../shared/interfaces/journey.interface';
 import { LoggerService } from '../../shared/logger/logger.service';
+import { OrganizationAccessRepository } from '../../database/repositories/organization-access.repository';
 
 @Injectable()
 export class JourneyService {
@@ -36,6 +37,7 @@ export class JourneyService {
     @Inject(forwardRef(() => LocationGateway))
     private locationGateway: LocationGateway,
     private logger: LoggerService,
+    private organizationAccessRepository: OrganizationAccessRepository,
   ) {}
 
   /**
@@ -67,6 +69,8 @@ export class JourneyService {
     const scheduledFor = createJourneyDto.scheduledFor
       ? this.parseScheduledFor(createJourneyDto.scheduledFor)
       : undefined;
+    const organizationId =
+      await this.organizationAccessRepository.findOrganizationForUser(userId);
 
     let journey: Awaited<ReturnType<JourneyRepository['create']>> | null = null;
     for (let attempt = 0; attempt < 5 && journey == null; attempt++) {
@@ -75,6 +79,7 @@ export class JourneyService {
           inviteCode: this.generateInviteCode(),
           name: createJourneyDto.name,
           leaderId: userId,
+          organizationId: organizationId ?? undefined,
           destination: createJourneyDto.destination,
           destinationAddress: createJourneyDto.destinationAddress,
           lagThresholdMeters:
