@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
 import {
   ClerkProvider,
   OrganizationSwitcher,
@@ -10,6 +11,7 @@ import {
 } from '@clerk/nextjs';
 import type { ReactNode } from 'react';
 import './globals.css';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { tulinkTokens } from '@tulink/ui';
 
 export const metadata: Metadata = {
@@ -69,6 +71,11 @@ export default function RootLayout({
 
             <div style={{ alignItems: 'center', display: 'flex', gap: 12 }}>
               <SignedIn>
+                <nav className="app-nav" aria-label="Dashboard navigation">
+                  <Link href="/dashboard">Operations</Link>
+                  <Link href="/dashboard/team">Team</Link>
+                  <Link href="/dashboard/live">Live map</Link>
+                </nav>
                 <OrganizationSwitcher
                   afterCreateOrganizationUrl="/create-organization"
                   organizationProfileUrl="/organization-profile"

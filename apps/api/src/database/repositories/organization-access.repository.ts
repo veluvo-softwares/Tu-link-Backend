@@ -161,6 +161,58 @@ export class OrganizationAccessRepository {
       .where(where);
   }
 
+  async listTeamMemberDelegations(
+    organizationId: string,
+    teamMemberIds: string[],
+  ) {
+    if (teamMemberIds.length === 0) return [];
+
+    return this.db
+      .select({
+        teamMemberId: organizationMemberDelegations.teamMemberId,
+        clerkUserId: organizationMemberships.clerkUserId,
+      })
+      .from(organizationMemberDelegations)
+      .innerJoin(
+        organizationTeamMembers,
+        eq(
+          organizationMemberDelegations.teamMemberId,
+          organizationTeamMembers.id,
+        ),
+      )
+      .innerJoin(
+        organizationMemberships,
+        eq(
+          organizationMemberDelegations.organizationMembershipId,
+          organizationMemberships.id,
+        ),
+      )
+      .where(
+        and(
+          eq(organizationTeamMembers.organizationId, organizationId),
+          eq(organizationTeamMembers.status, 'active'),
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.status, 'active'),
+          inArray(organizationTeamMembers.id, teamMemberIds),
+        ),
+      );
+  }
+
+  async removeTeamMember(organizationId: string, teamMemberId: string) {
+    const [removed] = await this.db
+      .update(organizationTeamMembers)
+      .set({ status: 'inactive', updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(organizationTeamMembers.id, teamMemberId),
+          eq(organizationTeamMembers.organizationId, organizationId),
+          eq(organizationTeamMembers.status, 'active'),
+        ),
+      )
+      .returning();
+    return removed ?? null;
+  }
+
   async assignDelegate(
     organizationId: string,
     clerkUserId: string,
@@ -203,5 +255,46 @@ export class OrganizationAccessRepository {
     return (
       delegation ?? { organizationMembershipId: membership.id, teamMemberId }
     );
+  }
+
+  async removeDelegate(
+    organizationId: string,
+    clerkUserId: string,
+    teamMemberId: string,
+  ) {
+    const [delegation] = await this.db
+      .select({ id: organizationMemberDelegations.id })
+      .from(organizationMemberDelegations)
+      .innerJoin(
+        organizationMemberships,
+        eq(
+          organizationMemberDelegations.organizationMembershipId,
+          organizationMemberships.id,
+        ),
+      )
+      .innerJoin(
+        organizationTeamMembers,
+        eq(
+          organizationMemberDelegations.teamMemberId,
+          organizationTeamMembers.id,
+        ),
+      )
+      .where(
+        and(
+          eq(organizationMemberships.organizationId, organizationId),
+          eq(organizationMemberships.clerkUserId, clerkUserId),
+          eq(organizationTeamMembers.organizationId, organizationId),
+          eq(organizationTeamMembers.id, teamMemberId),
+        ),
+      )
+      .limit(1);
+
+    if (!delegation) return null;
+
+    const [deleted] = await this.db
+      .delete(organizationMemberDelegations)
+      .where(eq(organizationMemberDelegations.id, delegation.id))
+      .returning();
+    return deleted ?? null;
   }
 }
