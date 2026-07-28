@@ -11,7 +11,7 @@ layout, CI, and deployment paths are updated.
 
 Environment files:
 - copy [`.env.example`](./.env.example) to `.env`
-- copy [`apps/dashboard/.env.example`](./apps/dashboard/.env.example) to `apps/dashboard/.env.local`
+- copy [`apps/dashboard/.env.example`](./apps/dashboard/.env.example) to `apps/dashboard/.env`
 
 Clerk only needs two values for phase 1:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
@@ -20,11 +20,25 @@ Clerk only needs two values for phase 1:
 For webhook-based org syncing, also add:
 - `CLERK_WEBHOOK_SIGNING_SECRET`
 
-Local infrastructure:
-- `docker compose -p tulink up -d postgres redis` starts Postgres + Redis only
-- `npm run dev` starts Postgres + Redis, then runs the monorepo apps with Turbo
+Docker development:
+- `npm start` builds and runs the dashboard, API, Postgres, and Redis
+- `npm start api` builds and runs the API plus its Postgres/Redis dependencies
+- `npm start dashboard` builds and runs the dashboard and its full dependency graph
+- `npm start postgres redis` runs only local infrastructure
+- `npm run docker:build -- api dashboard` builds selected application images
+- `npm stop` stops the local stack
+
+Host-based development:
+- `npm run dev` starts Postgres + Redis in Docker, then runs the monorepo apps with Turbo
 - `npm run docker:down` stops the local containers
 
 Ports:
 - Postgres: `127.0.0.1:5432`
 - Redis: `127.0.0.1:6379`
+
+Development deployment:
+- CI builds separate API and dashboard images
+- pushes to `dev` build and restart `api-dev` and `dashboard-dev` on the droplet
+- the droplet `.env` and CI environment both need `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- the droplet `.env` also provides the runtime-only `CLERK_SECRET_KEY`
+- the reverse proxy must route the chosen dashboard hostname to `dashboard-dev:3001`
