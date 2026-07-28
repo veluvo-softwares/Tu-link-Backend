@@ -37,6 +37,7 @@ import { ClerkWebhooksModule } from './modules/clerk-webhooks/clerk-webhooks.mod
     // Global configuration
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath: ['.env', '../../.env'],
       load: [
         appConfig,
         firebaseConfig,
