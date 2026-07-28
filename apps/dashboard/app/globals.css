@@ -1,0 +1,48 @@
+:root {
+  color-scheme: dark;
+  --tulink-carbon-black: #0b0f14;
+  --tulink-graphite: #141a22;
+  --tulink-electric-red: #e63946;
+  --tulink-ember-red: #b22234;
+  --tulink-warm-sand: #e8d8b8;
+  --tulink-ivory: #f8f5ef;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #0b0f14;
+  color: #f8f5ef;
+  font-family: Inter, system-ui, sans-serif;
+}
+
+button {
+  font: inherit;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.tulink-button {
+  background: linear-gradient(135deg, var(--tulink-electric-red), var(--tulink-ember-red));
+  border: 0;
+  border-radius: 999px;
+  color: var(--tulink-ivory);
+  cursor: pointer;
+  font-weight: 700;
+  padding: 11px 18px;
+}
+
+.tulink-button-ghost {
+  background: transparent;
+  border: 1px solid rgba(248, 245, 239, 0.18);
+}
+
+.tulink-panel {
+  background: linear-gradient(180deg, rgba(20, 26, 34, 0.96), rgba(11, 15, 20, 0.98));
+  border: 1px solid rgba(232, 216, 184, 0.12);
+  border-radius: 28px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.4);
+}

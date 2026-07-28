@@ -2,6 +2,10 @@
 /dist
 /node_modules
 /build
+/.turbo
+**/dist
+**/.next
+*.tsbuildinfo
 
 # Logs
 logs
