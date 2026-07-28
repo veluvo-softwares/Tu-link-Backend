@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, lte, sql } from 'drizzle-orm';
 import { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { JourneyStatus } from '../../types/journey-status.type';
@@ -13,6 +13,7 @@ export interface JourneyRecord {
   inviteCode: string;
   name: string;
   leaderId: string;
+  organizationId: string | null;
   status: JourneyStatus;
   scheduledFor: Date | null;
   startTime: Date | null;
@@ -29,6 +30,7 @@ export interface CreateJourneyInput {
   inviteCode: string;
   name: string;
   leaderId: string;
+  organizationId?: string;
   destination?: LatLng;
   destinationAddress?: string;
   lagThresholdMeters: number;
@@ -61,6 +63,7 @@ export class JourneyRepository {
       inviteCode: journeys.inviteCode,
       name: journeys.name,
       leaderId: journeys.leaderId,
+      organizationId: journeys.organizationId,
       status: journeys.status,
       scheduledFor: journeys.scheduledFor,
       startTime: journeys.startTime,
@@ -80,6 +83,7 @@ export class JourneyRepository {
     inviteCode: string;
     name: string;
     leaderId: string;
+    organizationId: string | null;
     status: JourneyStatus;
     scheduledFor: Date | null;
     startTime: Date | null;
@@ -109,6 +113,7 @@ export class JourneyRepository {
         name: input.name,
         inviteCode: input.inviteCode,
         leaderId: input.leaderId,
+        organizationId: input.organizationId,
         destination: input.destination
           ? geogPoint(input.destination.latitude, input.destination.longitude)
           : undefined,
@@ -137,6 +142,27 @@ export class JourneyRepository {
       .where(eq(journeys.inviteCode, inviteCode))
       .limit(1);
     return row ? this.toRecord(row) : null;
+  }
+
+  async findByOrganization(
+    organizationId: string,
+    leaderIds?: string[],
+  ): Promise<JourneyRecord[]> {
+    if (leaderIds && leaderIds.length === 0) return [];
+
+    const where = leaderIds
+      ? and(
+          eq(journeys.organizationId, organizationId),
+          inArray(journeys.leaderId, leaderIds),
+        )
+      : eq(journeys.organizationId, organizationId);
+
+    const rows = await this.db
+      .select(this.selection())
+      .from(journeys)
+      .where(where)
+      .orderBy(desc(journeys.createdAt));
+    return rows.map((row) => this.toRecord(row));
   }
 
   // tx-aware read of the leader's current ACTIVE journey. This is a plain

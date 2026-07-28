@@ -35,6 +35,9 @@ describe('JourneyService — single open journey lifecycle', () => {
     joinWithCode: jest.Mock;
     isParticipant: jest.Mock;
   };
+  let organizationAccessRepository: {
+    findOrganizationForUser: jest.Mock;
+  };
 
   beforeEach(() => {
     journeyRepository = {
@@ -53,6 +56,9 @@ describe('JourneyService — single open journey lifecycle', () => {
       releaseJoinedMemberships: jest.fn().mockResolvedValue(undefined),
       joinWithCode: jest.fn().mockResolvedValue(undefined),
       isParticipant: jest.fn().mockResolvedValue(true),
+    };
+    organizationAccessRepository = {
+      findOrganizationForUser: jest.fn().mockResolvedValue(null),
     };
 
     service = new JourneyService(
@@ -80,6 +86,7 @@ describe('JourneyService — single open journey lifecycle', () => {
         broadcastJourneyEnded: jest.fn().mockResolvedValue(undefined),
       } as never,
       { error: jest.fn(), warn: jest.fn() } as never,
+      organizationAccessRepository as never,
     );
   });
 
@@ -122,6 +129,29 @@ describe('JourneyService — single open journey lifecycle', () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(journeyRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('attributes a new journey to the leader organization', async () => {
+    organizationAccessRepository.findOrganizationForUser.mockResolvedValue(
+      'organization-1',
+    );
+    journeyRepository.create.mockResolvedValue(
+      journey(targetJourneyId, 'PENDING'),
+    );
+
+    await service.create(userId, {
+      name: 'Partner journey',
+      destination: { latitude: 0, longitude: 0 },
+      destinationAddress: 'Destination',
+      lagThresholdMeters: 500,
+    });
+
+    expect(journeyRepository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        leaderId: userId,
+        organizationId: 'organization-1',
+      }),
+    );
   });
 
   it('maps a raced database uniqueness failure to the open-journey conflict', async () => {

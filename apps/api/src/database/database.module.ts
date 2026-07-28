@@ -8,6 +8,7 @@ import { JourneyRepository } from './repositories/journey.repository';
 import { LagAlertRepository } from './repositories/lag-alert.repository';
 import { LocationRepository } from './repositories/location.repository';
 import { NotificationRepository } from './repositories/notification.repository';
+import { OrganizationAccessRepository } from './repositories/organization-access.repository';
 import { ParticipantRepository } from './repositories/participant.repository';
 import { UsersRepository } from './repositories/users.repository';
 
@@ -20,6 +21,7 @@ const repositories = [
   NotificationRepository,
   FcmTokenRepository,
   AnalyticsRepository,
+  OrganizationAccessRepository,
 ];
 
 @Global()
