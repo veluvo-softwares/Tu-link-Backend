@@ -1,14 +1,14 @@
 module.exports = {
-  'src/**/*.{ts,js}': [
-    'eslint --fix',
+  'apps/api/src/**/*.{ts,js}': [
+    'eslint --config apps/api/eslint.config.mjs --fix',
     'prettier --write'
   ],
-  'test/**/*.{ts,js}': [
-    'eslint --fix',
+  'apps/api/test/**/*.{ts,js}': [
+    'eslint --config apps/api/eslint.config.mjs --fix',
     'prettier --write'
   ],
-  '*.{ts,js}': [
+  '*.{ts,tsx,js,jsx}': [
     () => 'npm run build',
-    () => 'tsc --noEmit'
+    () => 'npm run typecheck'
   ]
 };

@@ -1,0 +1,51 @@
+services:
+  postgres:
+    container_name: tulink-postgres
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - tulink_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\"",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    container_name: tulink-redis
+    image: redis:7-alpine
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - tulink_redis_data:/data
+    command:
+      [
+        "sh",
+        "-c",
+        "if [ -n \"$${REDIS_PASSWORD}\" ]; then exec redis-server --requirepass \"$${REDIS_PASSWORD}\" --appendonly yes --save \"\" --stop-writes-on-bgsave-error no; else exec redis-server --appendonly yes --save \"\" --stop-writes-on-bgsave-error no; fi",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ -n \"$${REDIS_PASSWORD}\" ]; then redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG; else redis-cli ping | grep -q PONG; fi",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  tulink_postgres_data:
+  tulink_redis_data:

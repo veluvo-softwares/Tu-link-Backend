@@ -3,8 +3,24 @@ name: CI/CD Pipeline
 on:
   push:
     branches: [main, dev]
+    paths:
+      - 'apps/api/**'
+      - 'apps/dashboard/**'
+      - 'packages/ui/**'
+      - '.github/workflows/ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'turbo.json'
   pull_request:
     branches: [main, dev]
+    paths:
+      - 'apps/api/**'
+      - 'apps/dashboard/**'
+      - 'packages/ui/**'
+      - '.github/workflows/ci.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'turbo.json'
 
 permissions:
   contents: read
@@ -176,6 +192,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./apps/api/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -217,7 +234,7 @@ jobs:
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
 
-            cd /root/tulink-backend
+            cd /root/tulink-backend/apps/api
 
             # Build the release without replacing the currently healthy API.
             docker compose -f config/docker/docker-compose.dev.yml --profile server build api-dev
