@@ -40,6 +40,44 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  dashboard-dev:
+    build:
+      context: ../../../../
+      dockerfile: apps/dashboard/Dockerfile
+      target: production
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    container_name: dashboard-dev
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - TULINK_API_URL=http://api-dev:3000
+    env_file:
+      - ../../../../.env
+    expose:
+      - "3001"
+    depends_on:
+      api-dev:
+        condition: service_healthy
+    networks:
+      - tulink-network
+      - web
+    restart: unless-stopped
+    profiles:
+      - server
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http=require('http');http.get('http://localhost:3001/',(res)=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
       
   # Local development version of api-dev without server networks
   api-dev-local:

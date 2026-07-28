@@ -1,4 +1,77 @@
 services:
+  dashboard:
+    container_name: tulink-dashboard
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+      target: development
+    restart: unless-stopped
+    env_file:
+      - ./apps/dashboard/.env
+    environment:
+      TULINK_API_URL: http://api:3000
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - ./apps/dashboard:/app/apps/dashboard
+      - ./packages/ui:/app/packages/ui
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http=require('http');http.get('http://localhost:3001/',(res)=>process.exit(res.statusCode<500?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  api:
+    container_name: tulink-api
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./apps/api:/app/apps/api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const http=require('http');http.get('http://localhost:3000/health',(res)=>process.exit(res.statusCode===200?0:1)).on('error',()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
   postgres:
     container_name: tulink-postgres
     image: postgis/postgis:16-3.4
