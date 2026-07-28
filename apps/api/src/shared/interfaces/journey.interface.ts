@@ -5,6 +5,7 @@ export interface Journey {
   inviteCode: string;
   name: string;
   leaderId: string;
+  organizationId?: string | null;
   status: JourneyStatus;
   scheduledFor?: Date;
   startTime?: Date;

@@ -6,6 +6,7 @@ import {
   unique,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { users } from './users';
 
 export const organizations = pgTable(
   'organizations',
@@ -57,3 +58,56 @@ export const organizationMemberships = pgTable(
 
 export type OrganizationMembershipRow =
   typeof organizationMemberships.$inferSelect;
+
+export const organizationTeamMembers = pgTable(
+  'organization_team_members',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    status: text('status').notNull().default('active'),
+    createdByClerkUserId: text('created_by_clerk_user_id').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('organization_team_members_user_unique').on(t.userId),
+    index('idx_organization_team_members_org').on(t.organizationId, t.status),
+  ],
+);
+
+export type OrganizationTeamMemberRow =
+  typeof organizationTeamMembers.$inferSelect;
+
+export const organizationMemberDelegations = pgTable(
+  'organization_member_delegations',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    organizationMembershipId: uuid('organization_membership_id')
+      .notNull()
+      .references(() => organizationMemberships.id, { onDelete: 'cascade' }),
+    teamMemberId: uuid('team_member_id')
+      .notNull()
+      .references(() => organizationTeamMembers.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    unique('organization_member_delegations_unique').on(
+      t.organizationMembershipId,
+      t.teamMemberId,
+    ),
+    index('idx_organization_member_delegations_membership').on(
+      t.organizationMembershipId,
+    ),
+  ],
+);
