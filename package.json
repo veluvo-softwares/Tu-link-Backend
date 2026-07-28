@@ -9,6 +9,9 @@
     "packages/*"
   ],
   "scripts": {
+    "start": "docker compose -p tulink up --build",
+    "stop": "docker compose -p tulink down --remove-orphans",
+    "dc": "docker compose -p tulink",
     "build": "turbo run build",
     "build:api": "npm run build --workspace @tulink/api",
     "build:dashboard": "npm run build --workspace @tulink/dashboard",
@@ -23,6 +26,7 @@
     "db:migrate": "npm run db:migrate --workspace @tulink/api",
     "db:push": "npm run db:push --workspace @tulink/api",
     "docker:dev": "docker compose -p tulink up -d postgres redis",
+    "docker:build": "docker compose -p tulink build",
     "docker:down": "docker compose -p tulink down --remove-orphans",
     "docker:logs": "docker compose -p tulink logs -f",
     "prepare": "husky"

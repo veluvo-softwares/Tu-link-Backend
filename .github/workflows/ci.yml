@@ -11,6 +11,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'turbo.json'
+      - 'compose.yml'
   pull_request:
     branches: [main, dev]
     paths:
@@ -21,6 +22,7 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - 'turbo.json'
+      - 'compose.yml'
 
 permissions:
   contents: read
@@ -146,8 +148,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [test, security]
     outputs:
-      image-tag: ${{ steps.meta.outputs.tags }}
-      image-digest: ${{ steps.build.outputs.digest }}
+      api-image-tag: ${{ steps.meta-api.outputs.tags }}
+      api-image-digest: ${{ steps.build-api.outputs.digest }}
+      dashboard-image-tag: ${{ steps.meta-dashboard.outputs.tags }}
+      dashboard-image-digest: ${{ steps.build-dashboard.outputs.digest }}
 
     steps:
       - name: Checkout code
@@ -176,8 +180,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      - name: Extract API metadata
+        id: meta-api
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
@@ -187,17 +191,44 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push Docker image
-        id: build
+      - name: Build and push API image
+        id: build-api
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./apps/api/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          platforms: linux/amd64
+
+      - name: Extract dashboard metadata
+        id: meta-dashboard
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/dashboard
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push dashboard image
+        id: build-dashboard
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/dashboard/Dockerfile
+          target: production
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-dashboard.outputs.tags }}
+          labels: ${{ steps.meta-dashboard.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
           platforms: linux/amd64
 
   deploy:
@@ -234,38 +265,42 @@ jobs:
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
 
-            cd /root/tulink-backend/apps/api
+            cd /root/tulink-backend
 
-            # Build the release without replacing the currently healthy API.
-            docker compose -f config/docker/docker-compose.dev.yml --profile server build api-dev
+            COMPOSE_FILE=apps/api/config/docker/docker-compose.dev.yml
+
+            # Build the release without replacing the currently healthy services.
+            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server build api-dev dashboard-dev
 
             # Ensure the migration dependencies are healthy, then migrate using
             # the newly built image before switching the API container.
-            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d postgres redis
+            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server up -d postgres redis
 
             echo "Applying database migrations..."
             # Disable stdin explicitly: this command runs inside an SSH heredoc,
             # and Compose otherwise consumes the remaining deployment script.
-            docker compose -f config/docker/docker-compose.dev.yml --profile server run --rm --no-deps -T --interactive=false -e CI=true api-dev \
+            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server run --rm --no-deps -T --interactive=false -e CI=true api-dev \
               sh -c 'DATABASE_URL="postgresql://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" npm run db:migrate'
 
-            # Only replace the API after every migration has committed.
-            docker compose -f config/docker/docker-compose.dev.yml --profile server up -d --no-build --force-recreate --remove-orphans api-dev
+            # Only replace application services after every migration has committed.
+            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server up -d --no-build --force-recreate --remove-orphans api-dev dashboard-dev
 
-            # Wait for Docker's own health check to pass (port is internal, can't curl from host)
-            echo "Waiting for api-dev to be healthy..."
-            for i in {1..30}; do
-              status=$(docker inspect --format='{{.State.Health.Status}}' api-dev 2>/dev/null)
-              if [ "$status" = "healthy" ]; then
-                echo "api-dev is healthy!"
-                break
-              fi
-              if [ $i -eq 30 ]; then
-                echo "Health check failed after 30 attempts (last status: $status)"
-                exit 1
-              fi
-              echo "Attempt $i/30: status=$status, waiting 10s..."
-              sleep 10
+            # Wait for Docker's health checks (ports are internal to the web network).
+            for service in api-dev dashboard-dev; do
+              echo "Waiting for $service to be healthy..."
+              for i in {1..30}; do
+                status=$(docker inspect --format='{{.State.Health.Status}}' "$service" 2>/dev/null)
+                if [ "$status" = "healthy" ]; then
+                  echo "$service is healthy!"
+                  break
+                fi
+                if [ $i -eq 30 ]; then
+                  echo "$service health check failed after 30 attempts (last status: $status)"
+                  exit 1
+                fi
+                echo "Attempt $i/30: $service status=$status, waiting 10s..."
+                sleep 10
+              done
             done
 
             # Reload Caddy so the reverse proxy drops stale keepalive

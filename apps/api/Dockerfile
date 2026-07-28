@@ -1,4 +1,20 @@
 # Build from the monorepo root so npm can use the shared workspace lockfile.
+FROM node:20-alpine AS development
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/dashboard/package.json apps/dashboard/package.json
+COPY packages/ui/package.json packages/ui/package.json
+RUN npm ci --workspace @tulink/api --ignore-scripts
+
+COPY apps/api ./apps/api
+WORKDIR /app/apps/api
+ENV NODE_ENV=development
+EXPOSE 3000
+
+CMD ["npm", "run", "dev"]
+
 FROM node:20-alpine AS builder
 WORKDIR /app
 
