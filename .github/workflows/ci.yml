@@ -227,6 +227,7 @@ jobs:
           labels: ${{ steps.meta-dashboard.outputs.labels }}
           build-args: |
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${{ secrets.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN }}
           cache-from: type=gha,scope=dashboard
           cache-to: type=gha,mode=max,scope=dashboard
           platforms: linux/amd64

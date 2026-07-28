@@ -19,18 +19,25 @@ describe('OperatorAccessService', () => {
   let organizationAccessRepository: {
     getAccess: jest.Mock;
     listTeamMembers: jest.Mock;
+    listTeamMemberDelegations: jest.Mock;
     upsertTeamMember: jest.Mock;
+    removeTeamMember: jest.Mock;
     assignDelegate: jest.Mock;
+    removeDelegate: jest.Mock;
   };
   let journeyRepository: { findByOrganization: jest.Mock };
   let usersRepository: { findById: jest.Mock; search: jest.Mock };
+  let locationService: { getLatestLocationsForAuthorizedViewer: jest.Mock };
 
   beforeEach(() => {
     organizationAccessRepository = {
       getAccess: jest.fn().mockResolvedValue(adminAccess),
       listTeamMembers: jest.fn().mockResolvedValue([]),
+      listTeamMemberDelegations: jest.fn().mockResolvedValue([]),
       upsertTeamMember: jest.fn(),
+      removeTeamMember: jest.fn(),
       assignDelegate: jest.fn(),
+      removeDelegate: jest.fn(),
     };
     journeyRepository = {
       findByOrganization: jest.fn().mockResolvedValue([]),
@@ -39,10 +46,14 @@ describe('OperatorAccessService', () => {
       findById: jest.fn(),
       search: jest.fn().mockResolvedValue([]),
     };
+    locationService = {
+      getLatestLocationsForAuthorizedViewer: jest.fn(),
+    };
     service = new OperatorAccessService(
       organizationAccessRepository as never,
       journeyRepository as never,
       usersRepository as never,
+      locationService as never,
     );
   });
 
@@ -79,6 +90,54 @@ describe('OperatorAccessService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('returns live locations only for a visible journey', async () => {
+    journeyRepository.findByOrganization.mockResolvedValue([
+      { id: 'journey-visible' },
+    ]);
+    locationService.getLatestLocationsForAuthorizedViewer.mockResolvedValue({
+      participants: {},
+    });
+
+    await expect(
+      service.getJourneyLocations('org_clerk', 'user_admin', 'journey-visible'),
+    ).resolves.toEqual({ participants: {} });
+  });
+
+  it('does not reveal locations for an invisible journey', async () => {
+    journeyRepository.findByOrganization.mockResolvedValue([]);
+
+    await expect(
+      service.getJourneyLocations('org_clerk', 'user_admin', 'journey-hidden'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('builds a named location feed from active visible journeys', async () => {
+    journeyRepository.findByOrganization.mockResolvedValue([
+      { id: 'journey-live', status: 'ACTIVE' },
+      { id: 'journey-complete', status: 'COMPLETED' },
+    ]);
+    organizationAccessRepository.listTeamMembers.mockResolvedValue([
+      { id: 'member-1', userId: 'firebase-user-1', displayName: 'Amina' },
+    ]);
+    locationService.getLatestLocationsForAuthorizedViewer.mockResolvedValue({
+      participants: {
+        'firebase-user-1': {
+          location: { latitude: -1.28, longitude: 36.82 },
+        },
+      },
+    });
+
+    const result = await service.listLiveJourneyLocations(
+      'org_clerk',
+      'user_admin',
+    );
+
+    expect(result).toHaveLength(1);
+    expect(result[0].snapshot.participants['firebase-user-1']).toEqual(
+      expect.objectContaining({ displayName: 'Amina' }),
+    );
+  });
+
   it('prevents delegated members from managing the team', async () => {
     organizationAccessRepository.getAccess.mockResolvedValue({
       ...adminAccess,
@@ -92,11 +151,54 @@ describe('OperatorAccessService', () => {
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
+  it('adds delegation identities to visible team members', async () => {
+    organizationAccessRepository.listTeamMembers.mockResolvedValue([
+      { id: 'team-member-1', userId: 'firebase-user-1' },
+    ]);
+    organizationAccessRepository.listTeamMemberDelegations.mockResolvedValue([
+      {
+        teamMemberId: 'team-member-1',
+        clerkUserId: 'clerk-delegate-1',
+      },
+    ]);
+
+    await expect(
+      service.listTeamMembers('org_clerk', 'user_admin'),
+    ).resolves.toEqual([
+      {
+        id: 'team-member-1',
+        userId: 'firebase-user-1',
+        delegateClerkUserIds: ['clerk-delegate-1'],
+      },
+    ]);
+  });
+
+  it('requires an existing delegation before removing access', async () => {
+    organizationAccessRepository.removeDelegate.mockResolvedValue(null);
+
+    await expect(
+      service.removeDelegate(
+        'org_clerk',
+        'user_admin',
+        'team-member-1',
+        'clerk-delegate-1',
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('requires a real Tulink user before adding a team member', async () => {
     usersRepository.findById.mockResolvedValue(null);
 
     await expect(
       service.addTeamMember('org_clerk', 'user_admin', 'missing-user'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('requires an active team member before removing one', async () => {
+    organizationAccessRepository.removeTeamMember.mockResolvedValue(null);
+
+    await expect(
+      service.removeTeamMember('org_clerk', 'user_admin', 'team-member-1'),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 

@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseUUIDPipe,
@@ -49,6 +50,28 @@ export class OperatorController {
     );
   }
 
+  @Get('live-journeys')
+  listLiveJourneyLocations(@Req() request: ClerkRequest) {
+    const identity = this.requireIdentity(request);
+    return this.operatorAccessService.listLiveJourneyLocations(
+      identity.orgId,
+      identity.userId,
+    );
+  }
+
+  @Get('journeys/:journeyId/locations')
+  getJourneyLocations(
+    @Req() request: ClerkRequest,
+    @Param('journeyId', new ParseUUIDPipe()) journeyId: string,
+  ) {
+    const identity = this.requireIdentity(request);
+    return this.operatorAccessService.getJourneyLocations(
+      identity.orgId,
+      identity.userId,
+      journeyId,
+    );
+  }
+
   @Get('team-members')
   listTeamMembers(@Req() request: ClerkRequest) {
     const identity = this.requireIdentity(request);
@@ -78,6 +101,19 @@ export class OperatorController {
     );
   }
 
+  @Delete('team-members/:teamMemberId')
+  removeTeamMember(
+    @Req() request: ClerkRequest,
+    @Param('teamMemberId', new ParseUUIDPipe()) teamMemberId: string,
+  ) {
+    const identity = this.requireIdentity(request);
+    return this.operatorAccessService.removeTeamMember(
+      identity.orgId,
+      identity.userId,
+      teamMemberId,
+    );
+  }
+
   @Post('team-members/:teamMemberId/delegates')
   assignDelegate(
     @Req() request: ClerkRequest,
@@ -90,6 +126,21 @@ export class OperatorController {
       identity.userId,
       teamMemberId,
       dto.clerkUserId,
+    );
+  }
+
+  @Delete('team-members/:teamMemberId/delegates/:clerkUserId')
+  removeDelegate(
+    @Req() request: ClerkRequest,
+    @Param('teamMemberId', new ParseUUIDPipe()) teamMemberId: string,
+    @Param('clerkUserId') clerkUserId: string,
+  ) {
+    const identity = this.requireIdentity(request);
+    return this.operatorAccessService.removeDelegate(
+      identity.orgId,
+      identity.userId,
+      teamMemberId,
+      clerkUserId,
     );
   }
 

@@ -360,6 +360,12 @@ export class LocationService {
       throw new ForbiddenException('Not a participant of this journey');
     }
 
+    return this.getLatestLocationsForAuthorizedViewer(journeyId);
+  }
+
+  async getLatestLocationsForAuthorizedViewer(
+    journeyId: string,
+  ): Promise<LatestLocationsResponse> {
     // Get journey details for destination information
     const journey = await this.journeyService.findById(journeyId);
     const locations: Record<string, LocationUpdate> = {};
