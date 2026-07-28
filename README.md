@@ -20,6 +20,9 @@ Clerk only needs two values for phase 1:
 For webhook-based org syncing, also add:
 - `CLERK_WEBHOOK_SIGNING_SECRET`
 
+The live dashboard map also needs a URL-restricted Mapbox public token:
+- `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`
+
 Docker development:
 - `npm start` builds and runs the dashboard, API, Postgres, and Redis
 - `npm start api` builds and runs the API plus its Postgres/Redis dependencies
@@ -40,5 +43,6 @@ Development deployment:
 - CI builds separate API and dashboard images
 - pushes to `dev` build and restart `api-dev` and `dashboard-dev` on the droplet
 - the droplet `.env` and CI environment both need `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
+- the droplet `.env` and CI environment both need `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN`
 - the droplet `.env` also provides the runtime-only `CLERK_SECRET_KEY`
 - the reverse proxy must route the chosen dashboard hostname to `dashboard-dev:3001`
