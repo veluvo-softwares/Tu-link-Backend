@@ -1,4 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
+import Link from 'next/link';
 
 interface OperatorJourney {
   id: string;
@@ -91,16 +92,19 @@ export default async function DashboardPage() {
       label: 'Live journeys',
       value: live.length,
       detail: 'Teams currently moving',
+      tone: 'live',
     },
     {
       label: 'Pending journeys',
       value: pending.length,
       detail: 'Created and waiting to start',
+      tone: 'pending',
     },
     {
       label: 'Scheduled',
       value: scheduled.length,
       detail: 'Planned departures ahead',
+      tone: 'scheduled',
     },
   ];
 
@@ -109,10 +113,16 @@ export default async function DashboardPage() {
       <section className="dashboard-content">
         <div className="dashboard-heading">
           <div>
-            <p className="eyebrow">Organization operations</p>
-            <h1>Every team journey, one command view.</h1>
+            <p className="eyebrow">Organization command</p>
+            <h1>Operations control</h1>
+            <p className="page-intro">
+              Monitor active convoys, upcoming departures, and journeys that
+              need operator attention.
+            </p>
           </div>
-          <span className="live-badge">LIVE</span>
+          <span className={`live-badge ${loadError ? 'offline' : ''}`}>
+            {loadError ? 'Feed offline' : 'Live feed'}
+          </span>
         </div>
 
         {loadError ? (
@@ -124,7 +134,10 @@ export default async function DashboardPage() {
 
         <div className="metric-grid">
           {cards.map((card) => (
-            <article key={card.label} className="tulink-panel metric-card">
+            <article
+              key={card.label}
+              className={`tulink-panel metric-card ${card.tone}`}
+            >
               <p>{card.label}</p>
               <strong>{card.value}</strong>
               <span>{card.detail}</span>
@@ -138,7 +151,12 @@ export default async function DashboardPage() {
               <p className="eyebrow">Operational queue</p>
               <h2>Open journeys</h2>
             </div>
-            <span>{recent.length} visible</span>
+            <div className="section-actions">
+              <span>{recent.length} visible</span>
+              <Link className="text-link" href="/dashboard/live">
+                Open live tracking
+              </Link>
+            </div>
           </div>
 
           {recent.length === 0 ? (

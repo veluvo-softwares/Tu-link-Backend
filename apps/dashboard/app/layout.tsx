@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import localFont from 'next/font/local';
 import Link from 'next/link';
 import {
   ClerkProvider,
@@ -10,9 +11,9 @@ import {
   UserButton,
 } from '@clerk/nextjs';
 import type { ReactNode } from 'react';
+import { AppNavigation } from './app-navigation';
 import './globals.css';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import { tulinkTokens } from '@tulink/ui';
 
 export const metadata: Metadata = {
   title: 'Tulink Operator Dashboard',
@@ -20,6 +21,30 @@ export const metadata: Metadata = {
 };
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const inter = localFont({
+  src: './fonts/Inter-Variable.ttf',
+  variable: '--font-inter',
+  weight: '100 900',
+});
+const rajdhani = localFont({
+  src: [
+    {
+      path: './fonts/Rajdhani-Medium.ttf',
+      weight: '500',
+    },
+    {
+      path: './fonts/Rajdhani-SemiBold.ttf',
+      weight: '600',
+    },
+    {
+      path: './fonts/Rajdhani-Bold.ttf',
+      weight: '700',
+    },
+  ],
+  variable: '--font-rajdhani',
+});
+
+const fontVariables = `${inter.variable} ${rajdhani.variable}`;
 
 export default function RootLayout({
   children,
@@ -29,53 +54,31 @@ export default function RootLayout({
   if (!clerkPublishableKey) {
     return (
       <html lang="en">
-        <body>{children}</body>
+        <body className={fontVariables}>{children}</body>
       </html>
     );
   }
 
   return (
     <html lang="en">
-      <body>
+      <body className={fontVariables}>
         <ClerkProvider publishableKey={clerkPublishableKey}>
-          <header
-            style={{
-              alignItems: 'center',
-              backdropFilter: 'blur(18px)',
-              background: 'rgba(11, 15, 20, 0.72)',
-              borderBottom: '1px solid rgba(232, 216, 184, 0.12)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              gap: 16,
-              padding: '18px 28px',
-              position: 'sticky',
-              top: 0,
-              zIndex: 20,
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  color: tulinkTokens.colors.electricRed,
-                  fontFamily: tulinkTokens.fonts.badge,
-                  fontSize: 14,
-                  letterSpacing: 5,
-                }}
-              >
-                TULINK
-              </div>
-              <div style={{ color: 'rgba(248, 245, 239, 0.7)', fontSize: 13 }}>
-                Operator dashboard
-              </div>
-            </div>
+          <header className="command-header">
+            <Link className="brand-lockup" href="/dashboard">
+              <span className="brand-mark" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span>
+                <strong>TU-LINK</strong>
+                <small>Operations control</small>
+              </span>
+            </Link>
 
-            <div style={{ alignItems: 'center', display: 'flex', gap: 12 }}>
+            <div className="header-controls">
               <SignedIn>
-                <nav className="app-nav" aria-label="Dashboard navigation">
-                  <Link href="/dashboard">Operations</Link>
-                  <Link href="/dashboard/team">Team</Link>
-                  <Link href="/dashboard/live">Live map</Link>
-                </nav>
+                <AppNavigation />
                 <OrganizationSwitcher
                   afterCreateOrganizationUrl="/create-organization"
                   organizationProfileUrl="/organization-profile"
