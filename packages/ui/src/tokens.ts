@@ -1,11 +1,14 @@
 export const tulinkTokens = {
   colors: {
-    carbonBlack: '#0B0F14',
-    graphite: '#141A22',
-    electricRed: '#E63946',
-    emberRed: '#B22234',
-    warmSand: '#E8D8B8',
-    ivory: '#F8F5EF',
+    carbonBlack: '#0D0D0D',
+    graphite: '#1E1E1E',
+    brushedSteel: '#2A2A2A',
+    electricRed: '#E8002D',
+    silver: '#C8C8C8',
+    white: '#FFFFFF',
+    emberRed: '#B00022',
+    warmSand: '#C8C8C8',
+    ivory: '#FFFFFF',
   },
   fonts: {
     display: '"Rajdhani", "Arial Narrow", sans-serif',
