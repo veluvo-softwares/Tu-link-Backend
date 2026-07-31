@@ -112,7 +112,8 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
   let searchResults: UserSearchResult[] = [];
   let dashboardMembers: DashboardMember[] = [];
   let organizationName = 'Active organization';
-  let loadError = '';
+  let apiLoadError = '';
+  let clerkLoadError = '';
 
   try {
     [session, teamMembers] = await Promise.all([
@@ -126,7 +127,22 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
         token,
       );
     }
+  } catch {
+    session = {
+      access: {
+        organizationId: '',
+        role: clerkAuth.orgRole ?? 'org:member',
+        canManage: clerkAuth.orgRole === 'org:admin',
+        scope:
+          clerkAuth.orgRole === 'org:admin' ? 'organization' : 'delegated',
+      },
+    };
+    teamMembers = [];
+    apiLoadError =
+      'Team data could not be loaded. Confirm the API and Clerk backend configuration.';
+  }
 
+  try {
     const client = await clerkClient();
     const [organization, memberships] = await Promise.all([
       client.organizations.getOrganization({
@@ -154,19 +170,13 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
       ];
     });
   } catch {
-    session = {
-      access: {
-        organizationId: '',
-        role: clerkAuth.orgRole ?? 'org:member',
-        canManage: false,
-        scope: 'delegated',
-      },
-    };
-    teamMembers = [];
-    loadError =
-      'Team data could not be loaded. Confirm the API and Clerk backend configuration.';
+    clerkLoadError =
+      'Clerk organization members could not be loaded. Check the dashboard Clerk configuration.';
   }
 
+  const loadError = apiLoadError || clerkLoadError;
+  const canManage =
+    session.access.canManage || clerkAuth.orgRole === 'org:admin';
   const assignedUserIds = new Set(teamMembers.map((member) => member.userId));
   const memberByClerkId = new Map(
     dashboardMembers.map((member) => [member.userId, member]),
@@ -177,11 +187,11 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
       <section className="dashboard-content">
         <div className="team-hero">
           <div>
-            <p className="eyebrow">Team command</p>
-            <h1>People, access, and journey visibility.</h1>
+            <p className="eyebrow">Organization directory</p>
+            <h1>Team &amp; access</h1>
             <p className="hero-copy">
-              {organizationName} connects dashboard operators to the Tulink
-              members whose journeys they are responsible for.
+              Control who operates the dashboard and which {organizationName}{' '}
+              journeys each person is responsible for.
             </p>
           </div>
           <div className="access-stamp">
@@ -191,6 +201,11 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                 ? 'Organization-wide'
                 : 'Delegated view'}
             </strong>
+            {canManage ? (
+              <a className="team-add-cta" href="#add-mobile-member">
+                Add mobile member
+              </a>
+            ) : null}
           </div>
         </div>
 
@@ -232,7 +247,7 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                 <p className="eyebrow">Dashboard access</p>
                 <h2>Organization operators</h2>
               </div>
-              {session.access.canManage ? (
+              {canManage ? (
                 <Link className="text-link" href="/organization-profile">
                   Invite or change roles
                 </Link>
@@ -258,25 +273,38 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
             </div>
           </section>
 
-          {session.access.canManage ? (
-            <aside className="tulink-panel member-search-panel">
+          {canManage ? (
+            <aside
+              className="tulink-panel member-search-panel"
+              id="add-mobile-member"
+            >
               <p className="eyebrow">Add from Tulink</p>
-              <h2>Find a mobile user</h2>
+              <h2>Add a mobile member</h2>
               <p className="muted-copy">
                 Search by the name or email used in the Tulink app.
               </p>
+              {apiLoadError ? (
+                <p className="member-search-status">
+                  Connect the Tulink API to enable member search.
+                </p>
+              ) : null}
               <form className="member-search" method="get">
                 <label htmlFor="team-search">Name or email</label>
                 <div>
                   <input
                     defaultValue={q}
+                    disabled={Boolean(apiLoadError)}
                     id="team-search"
                     minLength={2}
                     name="q"
                     placeholder="e.g. njeri@company.com"
                     required
                   />
-                  <button className="tulink-button" type="submit">
+                  <button
+                    className="tulink-button"
+                    disabled={Boolean(apiLoadError)}
+                    type="submit"
+                  >
                     Search
                   </button>
                 </div>
@@ -332,6 +360,14 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                 Organization journeys appear after an admin adds a Tulink app
                 user to this team.
               </p>
+              {canManage ? (
+                <a
+                  className="tulink-button empty-state-action"
+                  href="#add-mobile-member"
+                >
+                  Add your first member
+                </a>
+              ) : null}
             </div>
           ) : (
             <div className="mobile-member-list">
@@ -345,7 +381,7 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                       <h3>{member.displayName}</h3>
                       <p>{member.email}</p>
                     </div>
-                    {session.access.canManage ? (
+                    {canManage ? (
                       <RemoveTeamMemberForm
                         displayName={member.displayName}
                         teamMemberId={member.id}
@@ -361,7 +397,7 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                         return (
                           <span className="delegate-chip" key={clerkUserId}>
                             {delegate?.displayName ?? clerkUserId}
-                            {session.access.canManage ? (
+                            {canManage ? (
                               <form action={removeDelegate}>
                                 <input
                                   name="teamMemberId"
@@ -393,8 +429,7 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
                       ) : null}
                     </div>
 
-                    {session.access.canManage &&
-                    dashboardMembers.length > 0 ? (
+                    {canManage && dashboardMembers.length > 0 ? (
                       <form className="delegate-form" action={assignDelegate}>
                         <input
                           name="teamMemberId"
