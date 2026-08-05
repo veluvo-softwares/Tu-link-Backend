@@ -89,7 +89,7 @@ export class LocationService {
       return {
         success: false,
         sequenceNumber: 0,
-        priority: 'LOW' as any,
+        priority: 'LOW',
         shouldBroadcast: false,
       };
     }
@@ -288,7 +288,7 @@ export class LocationService {
         isMoving: record.metadata?.isMoving ?? false,
         backfilled: record.backfilled,
       },
-    } as unknown as LocationHistory;
+    };
   }
 
   /**
@@ -318,8 +318,7 @@ export class LocationService {
       .map((r) => this.recordToHistory(r))
       .sort(
         (a, b) =>
-          new Date(b.timestamp as unknown as string).getTime() -
-          new Date(a.timestamp as unknown as string).getTime(),
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
       );
 
     // Prepare response with destination coordinates
