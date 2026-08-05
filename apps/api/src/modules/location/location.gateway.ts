@@ -32,6 +32,7 @@ import { LocationBackfillDto } from './dto/location-backfill.dto';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { NotificationService } from '../notification/notification.service';
 import { LagSeverity } from '../../types/notification.type';
+import { getAllowedOrigins } from '../../shared/security/cors';
 
 type SocketAuthErrorCode =
   | 'TOKEN_EXPIRED'
@@ -54,7 +55,7 @@ function createSocketAuthError(
 }
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { origin: getAllowedOrigins() },
   namespace: '/location',
   transports: ['websocket'],
 })

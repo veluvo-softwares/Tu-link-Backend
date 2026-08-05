@@ -16,8 +16,8 @@ import './globals.css';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 export const metadata: Metadata = {
-  title: 'Tulink Operator Dashboard',
-  description: 'Operator dashboard for fleet visibility and alerts.',
+  title: 'Tu-Link Operations',
+  description: 'Live journey visibility for Tu-Link organizations.',
 };
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
@@ -65,20 +65,18 @@ export default function RootLayout({
         <ClerkProvider publishableKey={clerkPublishableKey}>
           <header className="command-header">
             <Link className="brand-lockup" href="/dashboard">
-              <span className="brand-mark" aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
               <span>
                 <strong>TU-LINK</strong>
-                <small>Operations control</small>
+                <small>Operations</small>
               </span>
             </Link>
 
+            <SignedIn>
+              <AppNavigation />
+            </SignedIn>
+
             <div className="header-controls">
               <SignedIn>
-                <AppNavigation />
                 <OrganizationSwitcher
                   afterCreateOrganizationUrl="/create-organization"
                   organizationProfileUrl="/organization-profile"

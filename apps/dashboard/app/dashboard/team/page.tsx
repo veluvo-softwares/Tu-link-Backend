@@ -37,7 +37,6 @@ interface UserSearchResult {
   uid: string;
   email: string;
   displayName: string;
-  phoneNumber?: string;
 }
 
 interface DashboardMember {
