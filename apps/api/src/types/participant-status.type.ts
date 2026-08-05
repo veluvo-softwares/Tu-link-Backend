@@ -1,10 +1,5 @@
 export type ParticipantStatus =
-  | 'INVITED'
-  | 'ACCEPTED'
-  | 'DECLINED'
-  | 'ACTIVE'
-  | 'ARRIVED'
-  | 'LEFT';
+  'INVITED' | 'ACCEPTED' | 'DECLINED' | 'ACTIVE' | 'ARRIVED' | 'LEFT';
 
 export type ParticipantRole = 'LEADER' | 'FOLLOWER';
 

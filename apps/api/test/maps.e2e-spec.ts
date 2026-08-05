@@ -107,7 +107,7 @@ describe('MapsController (e2e)', () => {
       ok: false,
       status: 500,
       text: () => Promise.resolve('upstream error'),
-    } as unknown as Response);
+    });
 
     const res = await request(app.getHttpServer()).get(
       '/maps/search?query=cafe',
@@ -135,7 +135,7 @@ describe('MapsController (e2e)', () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve({ places: [] }),
-    } as unknown as Response);
+    });
 
     const res = await request(app.getHttpServer()).get(
       '/maps/search?query=cafe',
@@ -161,7 +161,7 @@ describe('MapsController (e2e)', () => {
       ok: false,
       status: 503,
       text: () => Promise.resolve('mapbox down'),
-    } as unknown as Response);
+    });
 
     const res = await request(app.getHttpServer())
       .post('/maps/route')
@@ -191,7 +191,7 @@ describe('MapsController (e2e)', () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve({ routes: [] }),
-    } as unknown as Response);
+    });
 
     const res = await request(app.getHttpServer())
       .post('/maps/route')

@@ -97,7 +97,7 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     altitude: 100,
     timestamp: 1640995200000,
     metadata: { batteryLevel: 80, isMoving: true },
-  } as LocationUpdateDto;
+  };
 
   const makeClient = (userId: string): Socket =>
     ({
