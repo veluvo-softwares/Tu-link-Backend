@@ -4,10 +4,10 @@ services:
     build:
       context: ../../../../
       dockerfile: apps/api/config/docker/Dockerfile
-      target: development
+      target: production
     container_name: api-dev
     environment:
-      - NODE_ENV=development
+      - NODE_ENV=production
       - PORT=3000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
@@ -33,13 +33,42 @@ services:
       # the rsynced source here lets the live watch process reload new queries
       # before their database migration has completed.
       - ../../../../logs:/usr/src/app/apps/api/logs
-    command: npm run start:dev
+    command: npm run start:prod
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
+
+  # Migration-only image retains drizzle-kit without running the API in
+  # development/watch mode. The deploy job runs this service before replacing
+  # the production API container.
+  api-migrate:
+    build:
+      context: ../../../../
+      dockerfile: apps/api/config/docker/Dockerfile
+      target: development
+    container_name: api-migrate
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+    env_file:
+      - ../../../../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - tulink-network
+    profiles:
+      - server
+    command: ["sh", "-c", "sleep infinity"]
 
   dashboard-dev:
     build:

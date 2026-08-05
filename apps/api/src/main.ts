@@ -5,13 +5,14 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { LoggerService } from './shared/logger/logger.service';
+import { getAllowedOrigins } from './shared/security/cors';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Enable CORS
   app.enableCors({
-    origin: process.env.WS_CORS_ORIGIN || '*',
+    origin: getAllowedOrigins(),
     credentials: true,
   });
 
@@ -119,8 +120,13 @@ For real-time location updates, connect to:
     .addServer('https://api.tulink.com', 'Production')
     .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  if (
+    process.env.NODE_ENV !== 'production' ||
+    process.env.ENABLE_SWAGGER === 'true'
+  ) {
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api', app, document);
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

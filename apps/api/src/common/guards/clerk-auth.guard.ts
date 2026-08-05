@@ -2,6 +2,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
@@ -73,6 +74,9 @@ export class ClerkAuthGuard implements CanActivate {
           );
       } catch (error) {
         console.warn('Clerk organization sync failed', error);
+        throw new ServiceUnavailableException(
+          'Authorization state is temporarily unavailable',
+        );
       }
     }
 

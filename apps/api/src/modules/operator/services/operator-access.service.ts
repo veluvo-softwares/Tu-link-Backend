@@ -124,7 +124,14 @@ export class OperatorAccessService {
   async searchUsers(clerkOrgId: string, clerkUserId: string, query: string) {
     await this.requireManager(clerkOrgId, clerkUserId);
     if (query.trim().length < 2) return [];
-    return this.usersRepository.search(query, 20);
+    const users = await this.usersRepository.search(query, 20);
+    // Operators only need an identifier to assign a mobile member. Do not
+    // expose phone numbers through the dashboard search response.
+    return users.map(({ uid, email, displayName }) => ({
+      uid,
+      email,
+      displayName,
+    }));
   }
 
   async addTeamMember(clerkOrgId: string, clerkUserId: string, userId: string) {
