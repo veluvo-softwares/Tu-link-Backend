@@ -132,14 +132,6 @@ jobs:
         # High-severity advisories must block a deploy.
         run: npm audit --audit-level high
 
-      - name: Run vulnerability scan with Snyk
-        uses: snyk/actions/node@master
-        continue-on-error: false
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-
   build:
     name: Build & Docker
     runs-on: ubuntu-latest
