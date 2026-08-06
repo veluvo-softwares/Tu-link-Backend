@@ -1,10 +1,11 @@
 services:
   # Tu-Link Backend Application - Development (replaces api-dev nginx)
   api-dev:
-    build:
-      context: ../../../../
-      dockerfile: apps/api/config/docker/Dockerfile
-      target: production
+    # Pulled, not built. The droplet is 1 vCPU / 2 GB with no swap and cannot
+    # build these images -- `next build` gets OOM-killed. CI builds them on a
+    # proper runner and pushes to ghcr; the deploy just pulls.
+    # IMAGE_TAG is pinned to the deployed commit by the deploy job.
+    image: ghcr.io/veluvo-softwares/tu-link-backend:${IMAGE_TAG:-dev}
     container_name: api-dev
     environment:
       - NODE_ENV=production
@@ -29,11 +30,10 @@ services:
     profiles:
       - server
     volumes:
-      # Server deployments run the source baked into the image. Bind-mounting
-      # the rsynced source here lets the live watch process reload new queries
-      # before their database migration has completed.
-      - ../../../../logs:/usr/src/app/apps/api/logs
-    command: npm run start:prod
+      # Persist rotated log files on the host so they survive container
+      # replacement. Path matches WORKDIR in apps/api/Dockerfile (/app), and the
+      # image runs as uid 1001, so the deploy chowns this directory to match.
+      - ../../../../logs:/app/apps/api/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
       interval: 30s
@@ -45,10 +45,9 @@ services:
   # development/watch mode. The deploy job runs this service before replacing
   # the production API container.
   api-migrate:
-    build:
-      context: ../../../../
-      dockerfile: apps/api/config/docker/Dockerfile
-      target: development
+    # Built from the `development` stage, which keeps drizzle-kit -- the
+    # production stage installs with --omit=dev and drops it.
+    image: ghcr.io/veluvo-softwares/tu-link-backend/migrate:${IMAGE_TAG:-dev}
     container_name: api-migrate
     environment:
       - NODE_ENV=production
@@ -71,13 +70,10 @@ services:
     command: ["sh", "-c", "sleep infinity"]
 
   dashboard-dev:
-    build:
-      context: ../../../../
-      dockerfile: apps/dashboard/Dockerfile
-      target: production
-      args:
-        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
-        NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: ${NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+    # Pulled, not built. `next build` is what OOM-killed the droplet.
+    # NEXT_PUBLIC_* values are baked in at image build time by CI, so they now
+    # come from GitHub secrets rather than the droplet's .env.
+    image: ghcr.io/veluvo-softwares/tu-link-backend/dashboard:${IMAGE_TAG:-dev}
     container_name: dashboard-dev
     environment:
       - NODE_ENV=production

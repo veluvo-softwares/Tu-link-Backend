@@ -30,6 +30,10 @@ RUN npm run build
 
 FROM node:20-alpine AS production
 RUN addgroup -g 1001 -S nodejs && adduser -S nestjs -u 1001 -G nodejs
+# curl is required by the compose-level healthcheck for the deployed api-dev
+# service, which probes /health with `curl -f`. Without it the container never
+# reports healthy and the deploy stalls on its health-wait loop.
+RUN apk add --no-cache curl
 WORKDIR /app
 
 COPY package.json package-lock.json ./
