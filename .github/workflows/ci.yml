@@ -196,6 +196,33 @@ jobs:
           cache-to: type=gha,mode=max,scope=api
           platforms: linux/amd64
 
+      - name: Extract migrate metadata
+        id: meta-migrate
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/migrate
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push migrate image
+        # The `development` stage keeps drizzle-kit, which the production stage
+        # drops via --omit=dev. The deploy runs migrations from this image.
+        id: build-migrate
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          target: development
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-migrate.outputs.tags }}
+          labels: ${{ steps.meta-migrate.outputs.labels }}
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,mode=max,scope=migrate
+          platforms: linux/amd64
+
       - name: Extract dashboard metadata
         id: meta-dashboard
         uses: docker/metadata-action@v5
@@ -230,6 +257,11 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/dev' && github.event_name == 'push'
     environment: development
+    permissions:
+      contents: read
+      # Required so the droplet can authenticate to ghcr and pull the images
+      # built by the `build` job.
+      packages: read
 
     steps:
       - name: Checkout code
@@ -255,18 +287,43 @@ jobs:
 
       - name: Deploy to DigitalOcean Droplet
         run: |
-          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
+          # Values are passed as remote environment variables so the heredoc can
+          # stay single-quoted -- otherwise every $VAR below would expand here
+          # on the runner instead of on the droplet.
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} \
+            "IMAGE_TAG='sha-$SHORT_SHA' \
+             GHCR_USER='${{ github.actor }}' \
+             GHCR_TOKEN='${{ secrets.GITHUB_TOKEN }}' \
+             bash -s" << 'EOF'
             set -e
 
             cd /root/tulink-backend
 
             COMPOSE_FILE=apps/api/config/docker/docker-compose.dev.yml
 
-            # Build the release without replacing the currently healthy services.
-            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server build api-migrate api-dev dashboard-dev
+            # IMAGE_TAG pins every service to the exact commit being deployed;
+            # compose reads it from the service image references. Export it so
+            # the nested docker compose invocations inherit it.
+            export IMAGE_TAG
+
+            # The droplet is 1 vCPU / 2 GB with no swap and cannot build these
+            # images -- next build gets OOM-killed. CI builds them; we pull.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            echo "Pulling images at tag $IMAGE_TAG..."
+            docker compose --env-file .env -f "$COMPOSE_FILE" --profile server pull api-migrate api-dev dashboard-dev
+
+            # Nothing after this needs the registry; don't leave the credential
+            # sitting in /root/.docker/config.json.
+            docker logout ghcr.io
+
+            # The API image runs as uid 1001; the bind-mounted log directory
+            # must be writable by it.
+            mkdir -p logs && chown -R 1001:1001 logs
 
             # Ensure the migration dependencies are healthy, then migrate using
-            # the newly built image before switching the API container.
+            # the pulled image before switching the API container.
             docker compose --env-file .env -f "$COMPOSE_FILE" --profile server up -d postgres redis
 
             echo "Applying database migrations..."
