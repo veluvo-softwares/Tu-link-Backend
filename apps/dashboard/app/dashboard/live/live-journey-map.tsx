@@ -19,6 +19,7 @@ import {
 } from '@phosphor-icons/react';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import mapboxgl, { type GeoJSONSource, type Map as MapboxMap } from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { startTransition, useEffect, useRef, useState } from 'react';
 
 export interface LiveLocation {
@@ -261,6 +262,7 @@ export function LiveJourneyMap({
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapboxMap | null>(null);
   const [journeys, setJourneys] = useState(initialJourneys);
+  const journeysRef = useRef(initialJourneys);
   const [selectedJourneyId, setSelectedJourneyId] = useState<
     string | undefined
   >(() => initialSelection(initialJourneys, initialNow));
@@ -304,6 +306,10 @@ export function LiveJourneyMap({
       (!normalizedQuery || searchable.includes(normalizedQuery))
     );
   });
+
+  useEffect(() => {
+    journeysRef.current = journeys;
+  }, [journeys]);
 
   useEffect(() => {
     if (demoMode) return;
@@ -445,13 +451,13 @@ export function LiveJourneyMap({
         if (!properties) return;
         setSelectedJourneyId(properties.journeyId);
         setSelectedParticipantId(properties.participantId);
-        focusMap(map, initialJourneys, properties.journeyId);
+        focusMap(map, journeysRef.current, properties.journeyId);
       });
 
       focusMap(
         map,
-        initialJourneys,
-        initialSelection(initialJourneys, initialNow),
+        journeysRef.current,
+        initialSelection(journeysRef.current, initialNow),
       );
     });
 
@@ -459,7 +465,7 @@ export function LiveJourneyMap({
       map.remove();
       mapRef.current = null;
     };
-  }, [mapboxToken, initialJourneys, initialNow]);
+  }, [mapboxToken, initialNow]);
 
   useEffect(() => {
     if (demoMode) return;
@@ -530,10 +536,7 @@ export function LiveJourneyMap({
     ? journeyStatus(selectedJourney, now)
     : undefined;
   const battery = activeMember?.metadata?.batteryLevel;
-  const batteryPercent =
-    battery === undefined
-      ? undefined
-      : Math.round(battery <= 1 ? battery * 100 : battery);
+  const batteryPercent = battery === undefined ? undefined : Math.round(battery);
   const speed =
     activeMember?.speed === undefined
       ? undefined

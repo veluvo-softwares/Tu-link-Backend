@@ -1,5 +1,6 @@
 import { auth } from '@clerk/nextjs/server';
 import Link from 'next/link';
+import { operatorFetch } from '../operator-api';
 
 interface OperatorJourney {
   id: string;
@@ -17,11 +18,7 @@ interface ApiResponse<T> {
 }
 
 async function getOrganizationJourneys(token: string) {
-  const apiUrl = process.env.TULINK_API_URL ?? 'http://localhost:3000';
-  const response = await fetch(`${apiUrl}/operator/journeys`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+  const response = await operatorFetch('/operator/journeys', token);
 
   if (!response.ok) {
     throw new Error(`Tulink API returned ${response.status}`);
@@ -127,8 +124,8 @@ export default async function DashboardPage() {
 
         {loadError ? (
           <div className="api-warning">
-            The Tulink API could not be reached. Check `TULINK_API_URL` and the
-            backend Clerk configuration.
+            The Tulink API is temporarily unavailable. Retry in a moment or
+            contact support if the problem continues.
           </div>
         ) : null}
 

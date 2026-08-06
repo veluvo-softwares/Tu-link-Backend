@@ -25,7 +25,10 @@ describe('OperatorAccessService', () => {
     assignDelegate: jest.Mock;
     removeDelegate: jest.Mock;
   };
-  let journeyRepository: { findByOrganization: jest.Mock };
+  let journeyRepository: {
+    findByOrganization: jest.Mock;
+    findVisibleByOrganization: jest.Mock;
+  };
   let usersRepository: { findById: jest.Mock; search: jest.Mock };
   let locationService: { getLatestLocationsForAuthorizedViewer: jest.Mock };
 
@@ -41,6 +44,7 @@ describe('OperatorAccessService', () => {
     };
     journeyRepository = {
       findByOrganization: jest.fn().mockResolvedValue([]),
+      findVisibleByOrganization: jest.fn().mockResolvedValue(null),
     };
     usersRepository = {
       findById: jest.fn(),
@@ -91,9 +95,9 @@ describe('OperatorAccessService', () => {
   });
 
   it('returns live locations only for a visible journey', async () => {
-    journeyRepository.findByOrganization.mockResolvedValue([
-      { id: 'journey-visible' },
-    ]);
+    journeyRepository.findVisibleByOrganization.mockResolvedValue({
+      id: 'journey-visible',
+    });
     locationService.getLatestLocationsForAuthorizedViewer.mockResolvedValue({
       participants: {},
     });
@@ -104,7 +108,7 @@ describe('OperatorAccessService', () => {
   });
 
   it('does not reveal locations for an invisible journey', async () => {
-    journeyRepository.findByOrganization.mockResolvedValue([]);
+    journeyRepository.findVisibleByOrganization.mockResolvedValue(null);
 
     await expect(
       service.getJourneyLocations('org_clerk', 'user_admin', 'journey-hidden'),
@@ -133,7 +137,12 @@ describe('OperatorAccessService', () => {
     );
 
     expect(result).toHaveLength(1);
-    expect(result[0].snapshot.participants['firebase-user-1']).toEqual(
+    const firstResult = result[0] as unknown as {
+      snapshot: {
+        participants: Record<string, { displayName: string }>;
+      };
+    };
+    expect(firstResult.snapshot.participants['firebase-user-1']).toEqual(
       expect.objectContaining({ displayName: 'Amina' }),
     );
   });
@@ -192,6 +201,34 @@ describe('OperatorAccessService', () => {
     await expect(
       service.addTeamMember('org_clerk', 'user_admin', 'missing-user'),
     ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('does not search for one-character queries', async () => {
+    await expect(
+      service.searchUsers('org_clerk', 'user_admin', 'a'),
+    ).resolves.toEqual([]);
+    expect(usersRepository.search).not.toHaveBeenCalled();
+  });
+
+  it('removes phone numbers from operator search results', async () => {
+    usersRepository.search.mockResolvedValue([
+      {
+        uid: 'firebase-user',
+        email: 'member@example.com',
+        displayName: 'Member',
+        phoneNumber: '+254700000000',
+      },
+    ]);
+
+    await expect(
+      service.searchUsers('org_clerk', 'user_admin', 'member'),
+    ).resolves.toEqual([
+      {
+        uid: 'firebase-user',
+        email: 'member@example.com',
+        displayName: 'Member',
+      },
+    ]);
   });
 
   it('requires an active team member before removing one', async () => {

@@ -13,7 +13,6 @@ import {
 import type { ReactNode } from 'react';
 import { AppNavigation } from './app-navigation';
 import './globals.css';
-import 'mapbox-gl/dist/mapbox-gl.css';
 
 export const metadata: Metadata = {
   title: 'Tu-Link Operations',

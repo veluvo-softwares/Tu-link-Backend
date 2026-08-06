@@ -2,15 +2,15 @@
 
 ## Target
 
-- Reference: `/Users/wesleynyamu/.codex/generated_images/019fa309-b484-7130-99a7-2c7cf4d099ba/exec-eff0d298-6865-42c4-b9c1-60eddbe3a513.png`
+- Reference: design reference supplied during the review session
 - Implementation: `http://localhost:3001/dashboard/live?demo=1`
 - Reference viewport: 1440 x 1024 CSS pixels
 - Implementation viewport: 1440 x 1024 CSS pixels
-- Final implementation capture: `/private/tmp/tulink-live-map-final.png`
-- Side-by-side comparison: `/private/tmp/tulink-live-map-final-comparison.png`
-- Refined decomposed inspector capture: `/private/tmp/tulink-live-map-refined-v2.png`
-- Refined mobile capture: `/private/tmp/tulink-live-map-refined-mobile.png`
-- Responsive navigation capture (663 x 851): `/private/tmp/tulink-mobile-nav-open-fixed-663.png`
+- Final implementation capture: local QA capture (not committed)
+- Side-by-side comparison: local QA capture (not committed)
+- Refined decomposed inspector capture: local QA capture (not committed)
+- Refined mobile capture: local QA capture (not committed)
+- Responsive navigation capture (663 x 851): local QA capture (not committed)
 
 ## State Reviewed
 

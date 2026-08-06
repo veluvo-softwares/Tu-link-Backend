@@ -1,5 +1,6 @@
 import {
   Body,
+  BadRequestException,
   Controller,
   Delete,
   Get,
@@ -82,12 +83,18 @@ export class OperatorController {
   }
 
   @Get('users/search')
-  searchUsers(@Req() request: ClerkRequest, @Query('q') query = '') {
+  searchUsers(
+    @Req() request: ClerkRequest,
+    @Query('q') query?: string | string[],
+  ) {
     const identity = this.requireIdentity(request);
+    if (Array.isArray(query)) {
+      throw new BadRequestException('q must be a single search string');
+    }
     return this.operatorAccessService.searchUsers(
       identity.orgId,
       identity.userId,
-      query,
+      query ?? '',
     );
   }
 

@@ -135,6 +135,31 @@ export class JourneyRepository {
     return row ? this.toRecord(row) : null;
   }
 
+  async findVisibleByOrganization(
+    journeyId: string,
+    organizationId: string,
+    leaderIds?: string[],
+  ): Promise<JourneyRecord | null> {
+    if (leaderIds && leaderIds.length === 0) return null;
+
+    const where = leaderIds
+      ? and(
+          eq(journeys.id, journeyId),
+          eq(journeys.organizationId, organizationId),
+          inArray(journeys.leaderId, leaderIds),
+        )
+      : and(
+          eq(journeys.id, journeyId),
+          eq(journeys.organizationId, organizationId),
+        );
+    const [row] = await this.db
+      .select(this.selection())
+      .from(journeys)
+      .where(where)
+      .limit(1);
+    return row ? this.toRecord(row) : null;
+  }
+
   async findByInviteCode(inviteCode: string): Promise<JourneyRecord | null> {
     const [row] = await this.db
       .select(this.selection())
