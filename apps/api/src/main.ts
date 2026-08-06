@@ -120,10 +120,10 @@ For real-time location updates, connect to:
     .addServer('https://api.tulink.com', 'Production')
     .build();
 
-  if (
+  const swaggerEnabled =
     process.env.NODE_ENV !== 'production' ||
-    process.env.ENABLE_SWAGGER === 'true'
-  ) {
+    process.env.ENABLE_SWAGGER === 'true';
+  if (swaggerEnabled) {
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('api', app, document);
   }
@@ -131,10 +131,10 @@ For real-time location updates, connect to:
   const port = process.env.PORT || 3000;
   await app.listen(port);
 
-  console.log(`
-    🚀 Tu-link Backend is running on: http://localhost:${port}
-    📚 API Documentation: http://localhost:${port}/api
-    🔌 WebSocket Gateway: ws://localhost:${port}
-  `);
+  console.log(
+    `Tu-link Backend is running on http://localhost:${port}. ` +
+      `WebSocket gateway: ws://localhost:${port}` +
+      (swaggerEnabled ? `; API docs: http://localhost:${port}/api` : ''),
+  );
 }
 void bootstrap();

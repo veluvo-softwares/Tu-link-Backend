@@ -7,6 +7,7 @@ import {
   removeDelegate,
 } from './actions';
 import { RemoveTeamMemberForm } from './remove-team-member-form';
+import { operatorFetch } from '../../operator-api';
 
 interface ApiEnvelope<T> {
   data: T;
@@ -54,13 +55,8 @@ interface TeamPageProps {
   }>;
 }
 
-const apiBaseUrl = process.env.TULINK_API_URL ?? 'http://localhost:3000';
-
 async function operatorGet<T>(path: string, token: string): Promise<T> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+  const response = await operatorFetch(path, token);
   if (!response.ok) {
     throw new Error(`Tulink API returned ${response.status}`);
   }
@@ -103,7 +99,15 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
 
   const token = await clerkAuth.getToken();
   if (!token) {
-    return null;
+    return (
+      <main className="dashboard-shell">
+        <section className="tulink-panel empty-state">
+          <p className="eyebrow">Session required</p>
+          <h1>Your operator session could not be verified</h1>
+          <p>Please sign in again to continue.</p>
+        </section>
+      </main>
+    );
   }
 
   let session: OperatorSession;
@@ -174,8 +178,9 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
   }
 
   const loadError = apiLoadError || clerkLoadError;
-  const canManage =
-    session.access.canManage || clerkAuth.orgRole === 'org:admin';
+  const canManage = apiLoadError
+    ? clerkAuth.orgRole === 'org:admin'
+    : session.access.canManage;
   const assignedUserIds = new Set(teamMembers.map((member) => member.userId));
   const memberByClerkId = new Map(
     dashboardMembers.map((member) => [member.userId, member]),

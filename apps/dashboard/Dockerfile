@@ -51,6 +51,6 @@ USER nextjs
 EXPOSE 3001
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-  CMD node -e "const http=require('http');http.get('http://localhost:3001/',(res)=>{process.exit(res.statusCode<500?0:1)}).on('error',()=>process.exit(1))"
+  CMD node -e "const http=require('http');http.get('http://localhost:3001/',(res)=>{process.exit(res.statusCode>=200&&res.statusCode<400?0:1)}).on('error',()=>process.exit(1))"
 
 CMD ["node", "apps/dashboard/server.js"]

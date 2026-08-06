@@ -8,6 +8,17 @@ import { JourneyRepository } from '../../../database/repositories/journey.reposi
 import { OrganizationAccessRepository } from '../../../database/repositories/organization-access.repository';
 import { UsersRepository } from '../../../database/repositories/users.repository';
 import { LocationService } from '../../location/location.service';
+import type {
+  LatestLocationsResponse,
+  LocationUpdate,
+} from '../../../shared/interfaces/location.interface';
+
+type DashboardLocationSnapshot = Omit<
+  LatestLocationsResponse,
+  'participants'
+> & {
+  participants: Record<string, LocationUpdate & { displayName: string }>;
+};
 
 @Injectable()
 export class OperatorAccessService {
@@ -43,11 +54,12 @@ export class OperatorAccessService {
     journeyId: string,
   ) {
     const access = await this.requireAccess(clerkOrgId, clerkUserId);
-    const journeys = await this.journeyRepository.findByOrganization(
+    const journey = await this.journeyRepository.findVisibleByOrganization(
+      journeyId,
       access.organizationId,
       access.visibleUserIds ?? undefined,
     );
-    if (!journeys.some((journey) => journey.id === journeyId)) {
+    if (!journey) {
       throw new NotFoundException('Visible journey not found');
     }
     return this.locationService.getLatestLocationsForAuthorizedViewer(
@@ -71,34 +83,38 @@ export class OperatorAccessService {
       teamMembers.map((member) => [member.userId, member.displayName]),
     );
 
-    return Promise.all(
-      journeys
-        .filter((journey) => journey.status === 'ACTIVE')
-        .map(async (journey) => {
-          const snapshot =
-            await this.locationService.getLatestLocationsForAuthorizedViewer(
-              journey.id,
-            );
-          return {
-            journey,
-            snapshot: {
-              ...snapshot,
-              participants: Object.fromEntries(
-                Object.entries(snapshot.participants).map(
-                  ([participantId, location]) => [
-                    participantId,
-                    {
-                      ...location,
-                      displayName:
-                        namesByUserId.get(participantId) ?? 'Tulink member',
-                    },
-                  ],
-                ),
-              ),
-            },
-          };
-        }),
-    );
+    const activeJourneys = journeys
+      .filter((journey) => journey.status === 'ACTIVE')
+      .slice(0, 100);
+    const result: Array<{
+      journey: (typeof activeJourneys)[number];
+      snapshot: DashboardLocationSnapshot;
+    }> = [];
+    for (const journey of activeJourneys) {
+      const snapshot =
+        await this.locationService.getLatestLocationsForAuthorizedViewer(
+          journey.id,
+        );
+      result.push({
+        journey,
+        snapshot: {
+          ...snapshot,
+          participants: Object.fromEntries(
+            Object.entries(snapshot.participants).map(
+              ([participantId, location]) => [
+                participantId,
+                {
+                  ...location,
+                  displayName:
+                    namesByUserId.get(participantId) ?? 'Tulink member',
+                },
+              ],
+            ),
+          ),
+        },
+      });
+    }
+    return result;
   }
 
   async listTeamMembers(clerkOrgId: string, clerkUserId: string) {

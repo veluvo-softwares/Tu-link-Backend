@@ -1,7 +1,6 @@
 import { auth } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
-
-const apiBaseUrl = process.env.TULINK_API_URL ?? 'http://localhost:3000';
+import { operatorFetch } from '../../../operator-api';
 
 export async function GET() {
   const { getToken, orgId } = await auth();
@@ -20,10 +19,15 @@ export async function GET() {
     );
   }
 
-  const response = await fetch(`${apiBaseUrl}/operator/live-journeys`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+  let response: Response;
+  try {
+    response = await operatorFetch('/operator/live-journeys', token);
+  } catch {
+    return NextResponse.json(
+      { message: 'Operator API unavailable' },
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const body = await response.text();
 
   return new NextResponse(body, {
@@ -31,6 +35,7 @@ export async function GET() {
     headers: {
       'Content-Type':
         response.headers.get('content-type') ?? 'application/json',
+      'Cache-Control': 'no-store',
     },
   });
 }

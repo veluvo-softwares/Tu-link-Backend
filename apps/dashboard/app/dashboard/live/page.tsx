@@ -1,11 +1,10 @@
 import { auth } from '@clerk/nextjs/server';
 import { LiveJourneyMap, type LiveJourney } from './live-journey-map';
+import { operatorFetch } from '../../operator-api';
 
 interface ApiEnvelope<T> {
   data: T;
 }
-
-const apiBaseUrl = process.env.TULINK_API_URL ?? 'http://localhost:3000';
 
 function createDemoJourneys(now: number): LiveJourney[] {
   const member = (
@@ -147,10 +146,7 @@ function createDemoJourneys(now: number): LiveJourney[] {
 }
 
 async function getLiveJourneys(token: string) {
-  const response = await fetch(`${apiBaseUrl}/operator/live-journeys`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
+  const response = await operatorFetch('/operator/live-journeys', token);
   if (!response.ok) {
     throw new Error(`Tulink API returned ${response.status}`);
   }
@@ -198,7 +194,9 @@ export default async function LiveMapPage({
   let journeys: LiveJourney[] = demoMode ? createDemoJourneys(renderedAt) : [];
   let loadError = '';
 
-  if (token && !demoMode) {
+  if (!demoMode && !token) {
+    loadError = 'Your operator session could not be verified. Please sign in again.';
+  } else if (token && !demoMode) {
     try {
       journeys = await getLiveJourneys(token);
     } catch {

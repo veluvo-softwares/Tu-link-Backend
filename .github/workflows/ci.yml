@@ -262,6 +262,9 @@ jobs:
       # Required so the droplet can authenticate to ghcr and pull the images
       # built by the `build` job.
       packages: read
+    concurrency:
+      group: deploy-development
+      cancel-in-progress: false
 
     steps:
       - name: Checkout code

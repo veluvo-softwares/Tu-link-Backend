@@ -1,6 +1,5 @@
 'use client';
 
-import type { FormEvent } from 'react';
 import { removeTeamMember } from './actions';
 
 interface RemoveTeamMemberFormProps {
@@ -12,20 +11,24 @@ export function RemoveTeamMemberForm({
   displayName,
   teamMemberId,
 }: RemoveTeamMemberFormProps) {
-  function confirmRemoval(event: FormEvent<HTMLFormElement>) {
-    if (
-      !window.confirm(
-        `Remove ${displayName} from this organization? Their future journeys will no longer be attributed to this team.`,
-      )
-    ) {
-      event.preventDefault();
-    }
+  function confirmRemoval() {
+    return window.confirm(
+      `Remove ${displayName} from this organization? Their future journeys will no longer be attributed to this team.`,
+    );
   }
 
   return (
-    <form action={removeTeamMember} onSubmit={confirmRemoval}>
+    <form action={removeTeamMember}>
       <input name="teamMemberId" type="hidden" value={teamMemberId} />
-      <button className="member-remove-button" type="submit">
+      <button
+        aria-label={`Remove ${displayName} from organization`}
+        className="member-remove-button"
+        formAction={removeTeamMember}
+        onClick={(event) => {
+          if (!confirmRemoval()) event.preventDefault();
+        }}
+        type="submit"
+      >
         Remove
       </button>
     </form>

@@ -252,9 +252,22 @@ export class OrganizationAccessRepository {
       })
       .onConflictDoNothing()
       .returning();
-    return (
-      delegation ?? { organizationMembershipId: membership.id, teamMemberId }
-    );
+    if (delegation) return delegation;
+
+    const [existing] = await this.db
+      .select()
+      .from(organizationMemberDelegations)
+      .where(
+        and(
+          eq(
+            organizationMemberDelegations.organizationMembershipId,
+            membership.id,
+          ),
+          eq(organizationMemberDelegations.teamMemberId, teamMember.id),
+        ),
+      )
+      .limit(1);
+    return existing ?? null;
   }
 
   async removeDelegate(

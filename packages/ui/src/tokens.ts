@@ -1,14 +1,20 @@
+const canonicalColors = {
+  carbonBlack: '#0D0D0D',
+  graphite: '#1E1E1E',
+  brushedSteel: '#2A2A2A',
+  electricRed: '#E8002D',
+  silver: '#C8C8C8',
+  white: '#FFFFFF',
+  emberRed: '#B00022',
+} as const;
+
 export const tulinkTokens = {
   colors: {
-    carbonBlack: '#0D0D0D',
-    graphite: '#1E1E1E',
-    brushedSteel: '#2A2A2A',
-    electricRed: '#E8002D',
-    silver: '#C8C8C8',
-    white: '#FFFFFF',
-    emberRed: '#B00022',
-    warmSand: '#C8C8C8',
-    ivory: '#FFFFFF',
+    ...canonicalColors,
+    /** @deprecated Use silver. */
+    warmSand: canonicalColors.silver,
+    /** @deprecated Use white. */
+    ivory: canonicalColors.white,
   },
   fonts: {
     display: '"Rajdhani", "Arial Narrow", sans-serif',

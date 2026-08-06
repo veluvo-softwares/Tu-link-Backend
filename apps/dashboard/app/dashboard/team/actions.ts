@@ -3,12 +3,11 @@
 import { auth } from '@clerk/nextjs/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import { operatorFetch } from '../../operator-api';
 
 interface ApiErrorPayload {
   message?: string | string[];
 }
-
-const apiBaseUrl = process.env.TULINK_API_URL ?? 'http://localhost:3000';
 
 async function mutateOperatorApi(path: string, init: RequestInit) {
   const { getToken, orgId } = await auth();
@@ -21,10 +20,9 @@ async function mutateOperatorApi(path: string, init: RequestInit) {
     throw new Error('Your Clerk session has expired');
   }
 
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await operatorFetch(path, token, {
     ...init,
     headers: {
-      Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       ...init.headers,
     },
