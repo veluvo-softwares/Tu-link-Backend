@@ -6,7 +6,10 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import type { Request } from 'express';
-import { getClerkClient } from '../../shared/clerk/clerk.client';
+import {
+  getClerkAuthorizedParties,
+  getClerkClient,
+} from '../../shared/clerk/clerk.client';
 import { ClerkIdentitySyncService } from '../../modules/operator/services/clerk-identity-sync.service';
 import type { ClerkSyncResult } from '../../modules/operator/services/clerk-identity-sync.service';
 
@@ -52,11 +55,7 @@ export class ClerkAuthGuard implements CanActivate {
 
     const authState = await clerkClient.authenticateRequest(
       authenticatedRequest,
-      {
-        authorizedParties: process.env.CLERK_AUTHORIZED_PARTIES?.split(',')
-          .map((party) => party.trim())
-          .filter(Boolean),
-      },
+      { authorizedParties: getClerkAuthorizedParties() },
     );
 
     if (!authState.isAuthenticated) {
