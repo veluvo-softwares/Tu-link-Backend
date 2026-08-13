@@ -6,8 +6,29 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { ResponseInterceptor } from './common/interceptors/response.interceptor';
 import { LoggerService } from './shared/logger/logger.service';
 import { getAllowedOrigins } from './shared/security/cors';
+import { assertClerkEnvironment } from './shared/clerk/clerk.env';
 
 async function bootstrap() {
+  // Fail fast on Clerk misconfiguration. The deployed API runs against a Clerk
+  // production instance and local development against a development instance;
+  // a mismatched or wrong-tenant key otherwise stays invisible until the first
+  // authenticated request 401s.
+  const clerkEnvironment = assertClerkEnvironment();
+
+  // Not fatal -- see clerk.env.ts. Surfaced so that if Clerk webhooks are ever
+  // pointed at this API, the resulting 400s are traceable to a missing secret
+  // rather than looking like Clerk misbehaving.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    !clerkEnvironment.webhookSigningSecret
+  ) {
+    console.warn(
+      'CLERK_WEBHOOK_SIGNING_SECRET is not set: Clerk webhooks will be ' +
+        'rejected. Organization access still syncs on each authenticated ' +
+        'request; deleted organizations will not be cleaned up.',
+    );
+  }
+
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
   // Enable CORS
@@ -134,7 +155,11 @@ For real-time location updates, connect to:
   console.log(
     `Tu-link Backend is running on http://localhost:${port}. ` +
       `WebSocket gateway: ws://localhost:${port}` +
-      (swaggerEnabled ? `; API docs: http://localhost:${port}/api` : ''),
+      (swaggerEnabled ? `; API docs: http://localhost:${port}/api` : '') +
+      // Surfaced at boot so a deploy log makes the active tenant obvious --
+      // the cutover's main failure mode is the API and dashboard ending up on
+      // different Clerk instances.
+      `; Clerk instance: ${clerkEnvironment.instance}`,
   );
 }
 void bootstrap();

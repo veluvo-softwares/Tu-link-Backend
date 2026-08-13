@@ -379,18 +379,31 @@ jobs:
           EOF
 
       - name: Verify deployment
-        # Retry the public health check: right after container recreation the
+        # Retry the public health checks: right after container recreation the
         # proxy may briefly serve a stale upstream, so a single curl is flaky.
+        # Both hostnames are checked because each is a separate Caddy site
+        # block -- a container can be healthy while its route is misconfigured.
         run: |
+          # The API exposes /health. The dashboard has no health endpoint and
+          # its root redirects unauthenticated visitors to sign-in, so accept
+          # any non-5xx there (same rule as its container healthcheck).
+          check_api() {
+            curl -sf --connect-timeout 5 --max-time 10 https://api.dev.tulink.xyz/health >/dev/null
+          }
+          check_dashboard() {
+            code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 5 --max-time 10 https://dashboard.tulink.xyz/) \
+              && [ -n "$code" ] && [ "$code" -lt 500 ]
+          }
+
           for i in {1..12}; do
-            if curl -sf --connect-timeout 5 --max-time 10 https://api.dev.tulink.xyz/health; then
+            if check_api && check_dashboard; then
               echo "Deployment verification successful!"
               exit 0
             fi
             echo "Attempt $i/12 failed, retrying in 10s..."
             sleep 10
           done
-          echo "Health check never passed after 120s"
+          echo "Health checks never passed after 120s"
           exit 1
 
       - name: Notify deployment status
