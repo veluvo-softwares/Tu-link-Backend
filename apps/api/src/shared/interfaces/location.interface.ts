@@ -80,6 +80,7 @@ export interface LocationHistoryResponse {
     latitude: number;
     longitude: number;
   };
+  destinationName?: string;
   destinationAddress?: string;
 }
 
@@ -89,5 +90,6 @@ export interface LatestLocationsResponse {
     latitude: number;
     longitude: number;
   };
+  destinationName?: string;
   destinationAddress?: string;
 }

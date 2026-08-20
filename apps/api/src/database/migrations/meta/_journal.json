@@ -85,6 +85,13 @@
       "when": 1785272908751,
       "tag": "0011_chilly_silk_fever",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786738585418,
+      "tag": "0012_journeys_destination_name",
+      "breakpoints": true
     }
   ]
 }

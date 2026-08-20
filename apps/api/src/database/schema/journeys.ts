@@ -43,6 +43,10 @@ export const journeys = pgTable(
     startTime: timestamp('start_time', { withTimezone: true }),
     endTime: timestamp('end_time', { withTimezone: true }),
     destination: geographyPoint('destination'),
+    // Human-readable place name (e.g. "Karen Shopping Centre"). Nullable:
+    // journeys created before this column exists — and older clients that
+    // still omit it — fall back to destinationAddress for display.
+    destinationName: text('destination_name'),
     destinationAddress: text('destination_address'),
     lagThresholdMeters: integer('lag_threshold_meters').notNull().default(500),
     createdAt: timestamp('created_at', { withTimezone: true })

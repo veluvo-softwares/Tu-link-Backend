@@ -26,6 +26,15 @@ export class CreateJourneyDto {
   @Type(() => LocationDto)
   destination?: LocationDto;
 
+  /**
+   * Human-readable place name (e.g. "Karen Shopping Centre"). Optional so
+   * clients released before this field keep working; consumers fall back to
+   * destinationAddress when it is absent.
+   */
+  @IsOptional()
+  @IsString()
+  destinationName?: string;
+
   @IsOptional()
   @IsString()
   destinationAddress?: string;
