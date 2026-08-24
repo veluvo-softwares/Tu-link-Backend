@@ -31,7 +31,9 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
   let participantService: jest.Mocked<
     Pick<ParticipantService, 'getJourneyParticipants'>
   >;
-  let journeyService: jest.Mocked<Pick<JourneyService, 'findById'>>;
+  let journeyService: jest.Mocked<
+    Pick<JourneyService, 'findById' | 'autoCompleteJourney'>
+  >;
   let locationService: jest.Mocked<
     Pick<LocationService, 'processLocationUpdate'>
   >;
@@ -113,7 +115,13 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
           provide: ParticipantService,
           useValue: { getJourneyParticipants: jest.fn() },
         },
-        { provide: JourneyService, useValue: { findById: jest.fn() } },
+        {
+          provide: JourneyService,
+          useValue: {
+            findById: jest.fn(),
+            autoCompleteJourney: jest.fn(),
+          },
+        },
         {
           provide: JourneyMetricsService,
           useValue: {
@@ -242,6 +250,37 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     expect(
       notificationService.resolveParticipantRecipients,
     ).not.toHaveBeenCalled();
+  });
+
+  it('delegates all-arrived completion without broadcasting a second journey-ended event', async () => {
+    locationService.processLocationUpdate.mockResolvedValue({
+      success: true,
+      shouldBroadcast: false,
+      sequenceNumber: 3,
+      priority: 'HIGH',
+      arrival: {
+        arrived: true,
+        arrivedCount: 3,
+        totalCount: 3,
+        allArrived: true,
+      },
+    } as any);
+    participantService.getJourneyParticipants.mockResolvedValue(participants);
+    notificationService.resolveParticipantRecipients.mockReturnValue([]);
+    journeyService.findById.mockResolvedValue({
+      id: JOURNEY_ID,
+      name: 'Test Journey',
+    } as any);
+    journeyService.autoCompleteJourney.mockResolvedValue({
+      id: JOURNEY_ID,
+    } as any);
+
+    await gateway.handleLocationUpdate(makeClient(ARRIVER_ID), payload);
+
+    expect(journeyService.autoCompleteJourney).toHaveBeenCalledWith(JOURNEY_ID);
+    expect(
+      emitMock.mock.calls.filter(([event]) => event === 'journey-ended'),
+    ).toHaveLength(0);
   });
 
   /**

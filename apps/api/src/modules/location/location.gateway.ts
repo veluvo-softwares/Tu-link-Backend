@@ -676,10 +676,7 @@ export class LocationGateway
         // Auto-complete the journey when everyone has arrived
         if (allArrived) {
           try {
-            const journey = await this.journeyService.autoCompleteJourney(
-              payload.journeyId,
-            );
-            await this.broadcastJourneyEnded(payload.journeyId, journey);
+            await this.journeyService.autoCompleteJourney(payload.journeyId);
           } catch (endError) {
             this.logger.error(
               `Auto-complete failed for journey ${payload.journeyId}: ${endError.message}`,

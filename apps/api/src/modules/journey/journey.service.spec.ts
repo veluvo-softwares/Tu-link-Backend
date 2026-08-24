@@ -38,6 +38,24 @@ describe('JourneyService — single open journey lifecycle', () => {
   let organizationAccessRepository: {
     findOrganizationForUser: jest.Mock;
   };
+  let redisService: {
+    addJourneyParticipant: jest.Mock;
+    getJourneyParticipants: jest.Mock;
+    removeActiveJourney: jest.Mock;
+    clearJourneyCache: jest.Mock;
+    getClient: jest.Mock;
+  };
+  let notificationService: {
+    resolveParticipantRecipients: jest.Mock;
+    sendParticipantJoined: jest.Mock;
+    sendJourneyCancelled: jest.Mock;
+    sendJourneyEnded: jest.Mock;
+  };
+  let analyticsService: { calculateJourneyAnalytics: jest.Mock };
+  let locationGateway: {
+    broadcastParticipantAccepted: jest.Mock;
+    broadcastJourneyEnded: jest.Mock;
+  };
 
   beforeEach(() => {
     journeyRepository = {
@@ -60,31 +78,39 @@ describe('JourneyService — single open journey lifecycle', () => {
     organizationAccessRepository = {
       findOrganizationForUser: jest.fn().mockResolvedValue(null),
     };
+    redisService = {
+      addJourneyParticipant: jest.fn(),
+      getJourneyParticipants: jest.fn().mockResolvedValue([]),
+      removeActiveJourney: jest.fn().mockResolvedValue(undefined),
+      clearJourneyCache: jest.fn().mockResolvedValue(undefined),
+      getClient: jest.fn().mockReturnValue({ del: jest.fn() }),
+    };
+    notificationService = {
+      resolveParticipantRecipients: jest.fn().mockReturnValue([]),
+      sendParticipantJoined: jest.fn(),
+      sendJourneyCancelled: jest.fn().mockResolvedValue(undefined),
+      sendJourneyEnded: jest.fn().mockResolvedValue(undefined),
+    };
+    analyticsService = {
+      calculateJourneyAnalytics: jest.fn().mockResolvedValue(undefined),
+    };
+    locationGateway = {
+      broadcastParticipantAccepted: jest.fn().mockResolvedValue(undefined),
+      broadcastJourneyEnded: jest.fn().mockResolvedValue(undefined),
+    };
 
     service = new JourneyService(
       journeyRepository as never,
       {
         findById: jest.fn().mockResolvedValue({ displayName: 'Driver' }),
       } as never,
-      {
-        addJourneyParticipant: jest.fn(),
-        getJourneyParticipants: jest.fn().mockResolvedValue([]),
-        clearJourneyCache: jest.fn(),
-        getClient: jest.fn().mockReturnValue({ del: jest.fn() }),
-      } as never,
+      redisService as never,
       {} as never,
       participantService as never,
-      {
-        resolveParticipantRecipients: jest.fn().mockReturnValue([]),
-        sendParticipantJoined: jest.fn(),
-        sendJourneyCancelled: jest.fn().mockResolvedValue(undefined),
-      } as never,
+      notificationService as never,
       { get: jest.fn() } as never,
-      {} as never,
-      {
-        broadcastParticipantAccepted: jest.fn().mockResolvedValue(undefined),
-        broadcastJourneyEnded: jest.fn().mockResolvedValue(undefined),
-      } as never,
+      analyticsService as never,
+      locationGateway as never,
       { error: jest.fn(), warn: jest.fn() } as never,
       organizationAccessRepository as never,
     );
@@ -305,5 +331,33 @@ describe('JourneyService — single open journey lifecycle', () => {
       service.joinWithCode('ABCD234567', userId),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(participantService.joinWithCode).not.toHaveBeenCalled();
+  });
+
+  it('broadcasts a manually ended journey exactly once from the service', async () => {
+    journeyRepository.findById.mockResolvedValue(
+      journey(targetJourneyId, 'ACTIVE'),
+    );
+
+    await service.end(targetJourneyId, 'leader-1');
+
+    expect(locationGateway.broadcastJourneyEnded).toHaveBeenCalledTimes(1);
+    expect(locationGateway.broadcastJourneyEnded).toHaveBeenCalledWith(
+      targetJourneyId,
+      expect.objectContaining({ id: targetJourneyId, participants: [] }),
+    );
+  });
+
+  it('broadcasts an automatically completed journey exactly once from the service', async () => {
+    journeyRepository.findById.mockResolvedValue(
+      journey(targetJourneyId, 'ACTIVE'),
+    );
+
+    await service.autoCompleteJourney(targetJourneyId);
+
+    expect(locationGateway.broadcastJourneyEnded).toHaveBeenCalledTimes(1);
+    expect(locationGateway.broadcastJourneyEnded).toHaveBeenCalledWith(
+      targetJourneyId,
+      expect.objectContaining({ id: targetJourneyId, participants: [] }),
+    );
   });
 });
