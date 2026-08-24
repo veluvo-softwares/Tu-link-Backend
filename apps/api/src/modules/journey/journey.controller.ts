@@ -20,7 +20,6 @@ import {
 } from '@nestjs/swagger';
 import { JourneyService } from './journey.service';
 import { ParticipantService } from './services/participant.service';
-import { LocationGateway } from '../location/location.gateway';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { InviteParticipantByIdDto } from './dto/invite-participant.dto';
@@ -35,7 +34,6 @@ export class JourneyController {
   constructor(
     private journeyService: JourneyService,
     private participantService: ParticipantService,
-    private locationGateway: LocationGateway,
   ) {}
 
   @Post()
@@ -186,9 +184,7 @@ export class JourneyController {
   @ApiResponse({ status: 403, description: 'Only leader can end journey' })
   @ApiResponse({ status: 404, description: 'Journey not found' })
   async end(@Param('id') id: string, @CurrentUser('uid') userId: string) {
-    const journey = await this.journeyService.end(id, userId);
-    await this.locationGateway.broadcastJourneyEnded(id, journey);
-    return journey;
+    return this.journeyService.end(id, userId);
   }
 
   @Get(':id/participants')
