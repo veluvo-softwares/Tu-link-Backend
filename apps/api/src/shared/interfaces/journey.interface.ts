@@ -11,6 +11,8 @@ export interface Journey {
   startTime?: Date;
   endTime?: Date;
   destination?: { latitude: number; longitude: number };
+  /** Place name; absent on journeys created before the column existed. */
+  destinationName?: string;
   destinationAddress?: string;
   lagThresholdMeters: number;
   createdAt: Date;

@@ -19,6 +19,7 @@ export interface JourneyRecord {
   startTime: Date | null;
   endTime: Date | null;
   destination: LatLng | null;
+  destinationName: string | null;
   destinationAddress: string | null;
   lagThresholdMeters: number;
   createdAt: Date;
@@ -32,6 +33,7 @@ export interface CreateJourneyInput {
   leaderId: string;
   organizationId?: string;
   destination?: LatLng;
+  destinationName?: string;
   destinationAddress?: string;
   lagThresholdMeters: number;
   scheduledFor?: Date;
@@ -41,6 +43,7 @@ export interface CreateJourneyInput {
 export interface UpdateJourneyInput {
   name?: string;
   destination?: LatLng;
+  destinationName?: string;
   destinationAddress?: string;
   lagThresholdMeters?: number;
   scheduledFor?: Date;
@@ -70,6 +73,7 @@ export class JourneyRepository {
       endTime: journeys.endTime,
       destinationLat: selectLat(journeys.destination),
       destinationLng: selectLng(journeys.destination),
+      destinationName: journeys.destinationName,
       destinationAddress: journeys.destinationAddress,
       lagThresholdMeters: journeys.lagThresholdMeters,
       createdAt: journeys.createdAt,
@@ -90,6 +94,7 @@ export class JourneyRepository {
     endTime: Date | null;
     destinationLat: number | null;
     destinationLng: number | null;
+    destinationName: string | null;
     destinationAddress: string | null;
     lagThresholdMeters: number;
     createdAt: Date;
@@ -117,6 +122,7 @@ export class JourneyRepository {
         destination: input.destination
           ? geogPoint(input.destination.latitude, input.destination.longitude)
           : undefined,
+        destinationName: input.destinationName,
         destinationAddress: input.destinationAddress,
         lagThresholdMeters: input.lagThresholdMeters,
         scheduledFor: input.scheduledFor,
@@ -220,6 +226,8 @@ export class JourneyRepository {
   ): Promise<JourneyRecord | null> {
     const set: Record<string, unknown> = { updatedAt: sql`now()` };
     if (patch.name !== undefined) set.name = patch.name;
+    if (patch.destinationName !== undefined)
+      set.destinationName = patch.destinationName;
     if (patch.destinationAddress !== undefined)
       set.destinationAddress = patch.destinationAddress;
     if (patch.lagThresholdMeters !== undefined)
