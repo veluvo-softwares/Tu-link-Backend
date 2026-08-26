@@ -43,6 +43,7 @@ interface Journey {
     latitude: number;
     longitude: number;
   };
+  destinationName?: string;
   destinationAddress?: string;
 }
 
@@ -325,6 +326,7 @@ export class LocationService {
     const response: {
       locations: LocationHistory[];
       destination?: { latitude: number; longitude: number };
+      destinationName?: string;
       destinationAddress?: string;
     } = {
       locations: latestLocations,
@@ -335,6 +337,10 @@ export class LocationService {
         latitude: journey.destination.latitude,
         longitude: journey.destination.longitude,
       };
+    }
+
+    if (journey.destinationName) {
+      response.destinationName = journey.destinationName;
     }
 
     if (journey.destinationAddress) {
@@ -439,6 +445,7 @@ export class LocationService {
     const response: {
       participants: Record<string, LocationUpdate>;
       destination?: { latitude: number; longitude: number };
+      destinationName?: string;
       destinationAddress?: string;
     } = {
       participants,
@@ -449,6 +456,10 @@ export class LocationService {
         latitude: journey.destination.latitude,
         longitude: journey.destination.longitude,
       };
+    }
+
+    if (journey.destinationName) {
+      response.destinationName = journey.destinationName;
     }
 
     if (journey.destinationAddress) {
@@ -834,6 +845,7 @@ export class LocationService {
     return {
       participants: filteredParticipants,
       destination: latest.destination,
+      destinationName: latest.destinationName,
       destinationAddress: latest.destinationAddress,
     };
   }

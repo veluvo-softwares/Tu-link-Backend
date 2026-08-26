@@ -81,6 +81,7 @@ export class JourneyService {
           leaderId: userId,
           organizationId: organizationId ?? undefined,
           destination: createJourneyDto.destination,
+          destinationName: createJourneyDto.destinationName,
           destinationAddress: createJourneyDto.destinationAddress,
           lagThresholdMeters:
             createJourneyDto.lagThresholdMeters ||
@@ -217,6 +218,7 @@ export class JourneyService {
     await this.journeyRepository.update(journeyId, {
       name: updateJourneyDto.name,
       destination: updateJourneyDto.destination,
+      destinationName: updateJourneyDto.destinationName,
       destinationAddress: updateJourneyDto.destinationAddress,
       lagThresholdMeters: updateJourneyDto.lagThresholdMeters,
       scheduledFor,
@@ -812,7 +814,8 @@ export class JourneyService {
         invitations.push({
           journeyId: journey.id,
           journeyName: journey.name,
-          destination: journey.destinationAddress,
+          // Prefer the place name; legacy journeys only have the address.
+          destination: journey.destinationName ?? journey.destinationAddress,
           invitedBy: {
             uid: participant.invitedBy,
             displayName: inviter?.displayName || 'Unknown',

@@ -12,7 +12,15 @@ import {
   MessageBody,
   WsException,
 } from '@nestjs/websockets';
-import { UseFilters, Inject, forwardRef } from '@nestjs/common';
+import {
+  UseFilters,
+  Inject,
+  forwardRef,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ExtendedError, Server, Socket } from 'socket.io';
 import { ConfigService } from '@nestjs/config';
 import { OnEvent } from '@nestjs/event-emitter';
@@ -476,7 +484,26 @@ export class LocationGateway
       );
 
       if (!result.success) {
-        // Throttled - don't broadcast
+        // Throttled or de-duplicated: we deliberately do not broadcast.
+        //
+        // We MUST still acknowledge. The client awaits an ack per
+        // `clientPointId` and only falls back to REST when it times out, so
+        // returning here without one made every throttled/de-duplicated update
+        // cost the client a full 10s timeout and a needless REST retry — which
+        // is exactly what a stationary device produces, because identical
+        // coordinates hit the 2s dedup window.
+        //
+        // `accepted: false` tells the client the server received the update and
+        // chose not to broadcast it, which is different from "no answer".
+        client.emit('location-update-ack', {
+          clientPointId: payload.clientPointId,
+          sequenceNumber: result.sequenceNumber,
+          priority: result.priority,
+          timestamp: Date.now(),
+          accepted: false,
+          reason: 'THROTTLED_OR_DUPLICATE',
+        });
+
         this.logger.info(
           `Location update received — userId resolved as: ${userId}`,
           'LocationGateway',
@@ -649,10 +676,7 @@ export class LocationGateway
         // Auto-complete the journey when everyone has arrived
         if (allArrived) {
           try {
-            const journey = await this.journeyService.autoCompleteJourney(
-              payload.journeyId,
-            );
-            await this.broadcastJourneyEnded(payload.journeyId, journey);
+            await this.journeyService.autoCompleteJourney(payload.journeyId);
           } catch (endError) {
             this.logger.error(
               `Auto-complete failed for journey ${payload.journeyId}: ${endError.message}`,
@@ -663,6 +687,23 @@ export class LocationGateway
       }
     } catch (error) {
       const latency = Date.now() - startTime;
+
+      // Acknowledge the failure too. The client waits on a per-point ack and
+      // cannot distinguish "server errored" from "server never heard me"; with
+      // no ack at all every failed update cost it a 10s timeout before the REST
+      // fallback. `accepted: false` lets it fall back immediately instead.
+      //
+      // The *reason* decides what the client does with the point. A retryable
+      // SERVER_ERROR keeps it queued for the REST fallback; a terminal reason
+      // (not a participant, journey not active, bad payload) tells the client
+      // to stop rather than retry a request that can never succeed.
+      client.emit('location-update-ack', {
+        clientPointId: payload?.clientPointId,
+        sequenceNumber: null,
+        timestamp: Date.now(),
+        accepted: false,
+        reason: this.rejectionReasonFor(error),
+      });
 
       this.logger.error(
         `Failed to process location update for journey ${payload.journeyId}: ${error.message}`,
@@ -692,6 +733,35 @@ export class LocationGateway
         timestamp: Date.now(),
       });
     }
+  }
+
+  /**
+   * Classify a location-update failure into the ack `reason` the client acts on.
+   *
+   * Terminal reasons must never be retried by the client; anything else is
+   * treated as retryable and keeps the point in the client's offline outbox.
+   * Mirrored by `LocationPublishAck` in the Flutter data layer.
+   */
+  private rejectionReasonFor(error: unknown): string {
+    const message = (error as Error)?.message ?? '';
+
+    if (/not active|journey is not active/i.test(message)) {
+      return 'JOURNEY_NOT_ACTIVE';
+    }
+    if (
+      error instanceof ForbiddenException ||
+      error instanceof NotFoundException ||
+      /not a participant/i.test(message)
+    ) {
+      return 'NOT_PARTICIPANT';
+    }
+    if (error instanceof UnauthorizedException) return 'UNAUTHORIZED';
+    if (error instanceof BadRequestException && !/rate limit/i.test(message)) {
+      // A rate limit is explicitly *not* terminal — the client should keep the
+      // point and try again, which is what SERVER_ERROR asks it to do.
+      return 'VALIDATION_ERROR';
+    }
+    return 'SERVER_ERROR';
   }
 
   /**
@@ -995,7 +1065,16 @@ export class LocationGateway
 
   async broadcastParticipantAccepted(journeyId: string, data: object) {
     await this.logRoomMembers(journeyId, 'participant-accepted');
-    this.server.to(`journey:${journeyId}`).emit('participant-accepted', data);
+    // Stamp the journey id into the payload itself.
+    //
+    // The event is room-scoped on the wire, but a client can be handing rooms
+    // over when it arrives, so it cannot safely infer identity from whichever
+    // room it currently believes it is in — a late acceptance for journey A
+    // was refreshing journey B's roster. Additive: it is a new key alongside
+    // the existing userId/displayName/status, so older clients are unaffected.
+    this.server
+      .to(`journey:${journeyId}`)
+      .emit('participant-accepted', { ...data, journeyId });
   }
 
   /**

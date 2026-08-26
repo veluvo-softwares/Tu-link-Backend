@@ -67,3 +67,8 @@ serviceAccountKey.json
 /Docs
 # GSD planning artifacts
 .planning/
+
+# Simulator-generated identity artifact — contains key material and is not
+# used by the API. Quarantined out of the worktree; never commit it.
+selfIdentity.plist
+**/selfIdentity.plist

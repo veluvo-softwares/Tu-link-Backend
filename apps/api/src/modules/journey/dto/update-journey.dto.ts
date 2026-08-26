@@ -29,6 +29,10 @@ export class UpdateJourneyDto {
 
   @IsOptional()
   @IsString()
+  destinationName?: string;
+
+  @IsOptional()
+  @IsString()
   destinationAddress?: string;
 
   @IsOptional()
