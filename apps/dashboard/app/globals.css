@@ -58,31 +58,27 @@ a {
 
 .brand-lockup {
   display: inline-flex;
+  flex: 0 0 auto;
+  gap: 11px;
   align-items: center;
   text-decoration: none;
 }
 
-.brand-lockup > span:last-child,
-.brand-lockup strong,
-.brand-lockup small {
+.brand-logo {
   display: block;
+  width: 140px;
+  height: auto;
 }
 
-.brand-lockup strong {
-  color: #ff2e4f;
-  font-family: var(--font-brand);
-  font-size: 1.22rem;
-  font-weight: 800;
-  letter-spacing: 0.2em;
-}
-
-.brand-lockup small {
-  margin-top: 1px;
+.brand-context {
+  border-left: 1px solid rgba(255, 255, 255, 0.28);
   color: rgba(255, 255, 255, 0.78);
   font-family: var(--font-brand);
-  font-size: 0.58rem;
+  font-size: 0.64rem;
   font-weight: 600;
-  letter-spacing: 0.26em;
+  letter-spacing: 0.18em;
+  line-height: 1;
+  padding: 4px 0 4px 11px;
   text-transform: uppercase;
 }
 
@@ -1855,11 +1851,11 @@ a {
     padding-top: 16px;
   }
 
-  .brand-lockup strong {
-    font-size: 0.88rem;
+  .brand-logo {
+    width: 112px;
   }
 
-  .brand-lockup small {
+  .brand-context {
     display: none;
   }
 
