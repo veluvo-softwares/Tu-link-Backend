@@ -1,0 +1,17 @@
+import type { ReactNode } from 'react';
+import { OpsChrome } from '../ops-chrome';
+import { getOpsChromeProps } from '../ops-context';
+
+export default async function DashboardLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const chrome = await getOpsChromeProps();
+
+  return (
+    <OpsChrome orgLabel={chrome.orgLabel} operatorLabel={chrome.operatorLabel}>
+      {children}
+    </OpsChrome>
+  );
+}

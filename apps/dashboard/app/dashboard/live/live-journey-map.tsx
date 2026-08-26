@@ -22,41 +22,16 @@ import mapboxgl, { type GeoJSONSource, type Map as MapboxMap } from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { startTransition, useEffect, useRef, useState } from 'react';
 
-export interface LiveLocation {
-  journeyId: string;
-  participantId: string;
-  displayName: string;
-  location: {
-    latitude: number;
-    longitude: number;
-  };
-  heading?: number;
-  speed?: number;
-  timestamp: number;
-  positionRecordedAt?: number;
-  connectionState?: string;
-  lastSeenAt?: number;
-  metadata?: {
-    batteryLevel?: number;
-    isMoving?: boolean;
-  };
-}
+import {
+  type LiveJourney,
+  type LiveLocation,
+  type LocationState,
+  locationState,
+  recordedAt,
+  journeyStatus,
+} from './live-status';
 
-export interface LiveJourney {
-  journey: {
-    id: string;
-    name: string;
-    destinationAddress: string | null;
-  };
-  snapshot: {
-    participants: Record<string, LiveLocation>;
-    destination?: {
-      latitude: number;
-      longitude: number;
-    };
-    destinationAddress?: string;
-  };
-}
+export type { LiveJourney, LiveLocation };
 
 interface ApiEnvelope<T> {
   data: T;
@@ -68,8 +43,6 @@ interface LiveJourneyMapProps {
   mapboxToken: string;
   demoMode?: boolean;
 }
-
-type LocationState = 'reporting' | 'delayed' | 'offline';
 
 interface ParticipantProperties {
   journeyId: string;
@@ -87,23 +60,6 @@ interface DestinationProperties {
   label: string;
 }
 
-const DELAYED_AFTER_MS = 30_000;
-const OFFLINE_AFTER_MS = 60_000;
-
-function recordedAt(location: LiveLocation) {
-  return location.positionRecordedAt ?? location.timestamp;
-}
-
-function locationState(location: LiveLocation, now: number): LocationState {
-  const age = now - recordedAt(location);
-  if (location.connectionState === 'DISCONNECTED' || age >= OFFLINE_AFTER_MS) {
-    return 'offline';
-  }
-  if (location.connectionState !== 'CONNECTED' || age >= DELAYED_AFTER_MS) {
-    return 'delayed';
-  }
-  return 'reporting';
-}
 
 function relativeTime(timestamp: number, now: number) {
   const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
@@ -225,18 +181,6 @@ function focusMap(map: MapboxMap, journeys: LiveJourney[], journeyId?: string) {
   });
 }
 
-function journeyStatus(item: LiveJourney, now: number) {
-  const members = Object.values(item.snapshot.participants);
-  const attentionCount = members.filter(
-    (member) => locationState(member, now) !== 'reporting',
-  ).length;
-  const latestTimestamp = members.reduce(
-    (latest, member) => Math.max(latest, recordedAt(member)),
-    0,
-  );
-  return { attentionCount, latestTimestamp };
-}
-
 function initialSelection(journeys: LiveJourney[], now: number) {
   const attentionJourney = journeys.find(
     (item) => journeyStatus(item, now).attentionCount > 0,
@@ -323,7 +267,7 @@ export function LiveJourneyMap({
     const map = new mapboxgl.Map({
       accessToken: mapboxToken,
       container: containerRef.current,
-      style: 'mapbox://styles/mapbox/dark-v11',
+      style: 'mapbox://styles/mapbox/light-v11',
       center: [36.8219, -1.2921],
       zoom: 10.5,
       attributionControl: false,
@@ -377,9 +321,9 @@ export function LiveJourneyMap({
             'match',
             ['get', 'locationState'],
             'reporting',
-            '#25d07f',
+            '#1e8e63',
             'delayed',
-            '#ffb020',
+            '#f35d32',
             '#77736d',
           ],
           'circle-stroke-width': 2,
@@ -399,8 +343,8 @@ export function LiveJourneyMap({
           'text-allow-overlap': false,
         },
         paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': '#0d0d0d',
+          'text-color': '#1a1a19',
+          'text-halo-color': '#ffffff',
           'text-halo-width': 1.5,
         },
       });
@@ -415,7 +359,7 @@ export function LiveJourneyMap({
         source: 'live-destinations',
         paint: {
           'circle-radius': 9,
-          'circle-color': '#e8002d',
+          'circle-color': '#f35d32',
           'circle-stroke-width': 3,
           'circle-stroke-color': '#ffffff',
         },
@@ -432,8 +376,8 @@ export function LiveJourneyMap({
           'text-anchor': 'top',
         },
         paint: {
-          'text-color': '#ffffff',
-          'text-halo-color': '#0d0d0d',
+          'text-color': '#075261',
+          'text-halo-color': '#ffffff',
           'text-halo-width': 1.5,
         },
       });

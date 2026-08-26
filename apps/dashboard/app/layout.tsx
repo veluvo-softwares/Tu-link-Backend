@@ -1,18 +1,12 @@
 import type { Metadata, Viewport } from 'next';
-import localFont from 'next/font/local';
-import Image from 'next/image';
-import Link from 'next/link';
+import { Manrope } from 'next/font/google';
 import {
   ClerkProvider,
-  OrganizationSwitcher,
   SignInButton,
   SignUpButton,
-  SignedIn,
   SignedOut,
-  UserButton,
 } from '@clerk/nextjs';
 import type { ReactNode } from 'react';
-import { AppNavigation } from './app-navigation';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -74,35 +68,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: 'dark',
+  colorScheme: 'light',
   themeColor: '#075261',
 };
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const inter = localFont({
-  src: './fonts/Inter-Variable.ttf',
-  variable: '--font-inter',
-  weight: '100 900',
+const manrope = Manrope({
+  subsets: ['latin'],
+  variable: '--font-manrope',
+  weight: ['400', '500', '600', '700', '800'],
 });
-const rajdhani = localFont({
-  src: [
-    {
-      path: './fonts/Rajdhani-Medium.ttf',
-      weight: '500',
-    },
-    {
-      path: './fonts/Rajdhani-SemiBold.ttf',
-      weight: '600',
-    },
-    {
-      path: './fonts/Rajdhani-Bold.ttf',
-      weight: '700',
-    },
-  ],
-  variable: '--font-rajdhani',
-});
-
-const fontVariables = `${inter.variable} ${rajdhani.variable}`;
 
 export default function RootLayout({
   children,
@@ -112,45 +87,28 @@ export default function RootLayout({
   if (!clerkPublishableKey) {
     return (
       <html lang="en">
-        <body className={fontVariables}>{children}</body>
+        <body className={`${manrope.variable} ${manrope.className}`}>{children}</body>
       </html>
     );
   }
 
   return (
     <html lang="en">
-      <body className={fontVariables}>
-        <ClerkProvider publishableKey={clerkPublishableKey}>
-          <header className="command-header">
-            <Link
-              aria-label="Tu-Link Operations dashboard"
-              className="brand-lockup"
-              href="/dashboard"
-            >
-              <Image
-                alt=""
-                className="brand-logo"
-                height={161}
-                priority
-                src="/brand/tulink-horizontal-reversed.webp"
-                width={640}
-              />
-              <span className="brand-context">Operations</span>
-            </Link>
-
-            <SignedIn>
-              <AppNavigation />
-            </SignedIn>
-
-            <div className="header-controls">
-              <SignedIn>
-                <OrganizationSwitcher
-                  afterCreateOrganizationUrl="/create-organization"
-                  organizationProfileUrl="/organization-profile"
-                />
-                <UserButton afterSignOutUrl="/" />
-              </SignedIn>
-              <SignedOut>
+      <body className={`${manrope.variable} ${manrope.className}`}>
+        <ClerkProvider
+          publishableKey={clerkPublishableKey}
+          signInFallbackRedirectUrl="/dashboard"
+          signInUrl="/sign-in"
+          signUpFallbackRedirectUrl="/dashboard"
+          signUpUrl="/sign-up"
+        >
+          <SignedOut>
+            <header className="public-header">
+              <a className="ops-brand public" href="/">
+                <strong>TU-LINK</strong>
+                <small>Operations</small>
+              </a>
+              <div className="header-controls">
                 <SignInButton mode="modal">
                   <button className="tulink-button tulink-button-ghost">
                     Sign in
@@ -159,9 +117,9 @@ export default function RootLayout({
                 <SignUpButton mode="modal">
                   <button className="tulink-button">Create account</button>
                 </SignUpButton>
-              </SignedOut>
-            </div>
-          </header>
+              </div>
+            </header>
+          </SignedOut>
           {children}
         </ClerkProvider>
       </body>
