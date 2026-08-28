@@ -1,49 +1,83 @@
-import type { Metadata } from 'next';
-import localFont from 'next/font/local';
-import Link from 'next/link';
+import type { Metadata, Viewport } from 'next';
+import { Manrope } from 'next/font/google';
 import {
   ClerkProvider,
-  OrganizationSwitcher,
   SignInButton,
   SignUpButton,
-  SignedIn,
   SignedOut,
-  UserButton,
 } from '@clerk/nextjs';
 import type { ReactNode } from 'react';
-import { AppNavigation } from './app-navigation';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Tu-Link Operations',
+  metadataBase: new URL('https://dashboard.tulink.xyz'),
+  applicationName: 'Tu-Link Operations',
+  title: {
+    default: 'Tu-Link Operations',
+    template: '%s | Tu-Link Operations',
+  },
   description: 'Live journey visibility for Tu-Link organizations.',
+  manifest: '/site.webmanifest',
+  icons: {
+    icon: [
+      { url: '/favicon.ico' },
+      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' },
+    ],
+    apple: [
+      {
+        url: '/apple-touch-icon.png',
+        sizes: '180x180',
+        type: 'image/png',
+      },
+    ],
+    other: [
+      {
+        rel: 'mask-icon',
+        url: '/safari-pinned-tab.svg',
+        color: '#075261',
+      },
+    ],
+  },
+  openGraph: {
+    type: 'website',
+    url: 'https://dashboard.tulink.xyz',
+    siteName: 'Tu-Link Operations',
+    title: 'Tu-Link Operations',
+    description: 'Live journey visibility for Tu-Link organizations.',
+    images: [
+      {
+        url: '/open-graph-1200x630.png',
+        width: 1200,
+        height: 630,
+        alt: 'Tu-Link',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Tu-Link Operations',
+    description: 'Live journey visibility for Tu-Link organizations.',
+    images: ['/open-graph-1200x630.png'],
+  },
+  other: {
+    'msapplication-config': '/browserconfig.xml',
+    'msapplication-TileColor': '#075261',
+  },
+};
+
+export const viewport: Viewport = {
+  colorScheme: 'light',
+  themeColor: '#075261',
 };
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const inter = localFont({
-  src: './fonts/Inter-Variable.ttf',
-  variable: '--font-inter',
-  weight: '100 900',
+const manrope = Manrope({
+  subsets: ['latin'],
+  variable: '--font-manrope',
+  weight: ['400', '500', '600', '700', '800'],
 });
-const rajdhani = localFont({
-  src: [
-    {
-      path: './fonts/Rajdhani-Medium.ttf',
-      weight: '500',
-    },
-    {
-      path: './fonts/Rajdhani-SemiBold.ttf',
-      weight: '600',
-    },
-    {
-      path: './fonts/Rajdhani-Bold.ttf',
-      weight: '700',
-    },
-  ],
-  variable: '--font-rajdhani',
-});
-
-const fontVariables = `${inter.variable} ${rajdhani.variable}`;
 
 export default function RootLayout({
   children,
@@ -53,36 +87,34 @@ export default function RootLayout({
   if (!clerkPublishableKey) {
     return (
       <html lang="en">
-        <body className={fontVariables}>{children}</body>
+        <body className={`${manrope.variable} ${manrope.className}`}>{children}</body>
       </html>
     );
   }
 
   return (
     <html lang="en">
-      <body className={fontVariables}>
-        <ClerkProvider publishableKey={clerkPublishableKey}>
-          <header className="command-header">
-            <Link className="brand-lockup" href="/dashboard">
-              <span>
-                <strong>TU-LINK</strong>
-                <small>Operations</small>
-              </span>
-            </Link>
-
-            <SignedIn>
-              <AppNavigation />
-            </SignedIn>
-
-            <div className="header-controls">
-              <SignedIn>
-                <OrganizationSwitcher
-                  afterCreateOrganizationUrl="/create-organization"
-                  organizationProfileUrl="/organization-profile"
-                />
-                <UserButton afterSignOutUrl="/" />
-              </SignedIn>
-              <SignedOut>
+      <body className={`${manrope.variable} ${manrope.className}`}>
+        <ClerkProvider
+          publishableKey={clerkPublishableKey}
+          signInFallbackRedirectUrl="/dashboard"
+          signInUrl="/sign-in"
+          signUpFallbackRedirectUrl="/create-organization"
+          signUpUrl="/sign-up"
+        >
+          <SignedOut>
+            <header className="public-header">
+              <a className="public-brand" href="/" aria-label="Tu-Link Operations home">
+                <span className="public-brand-mark">
+                  <img src="/brand/tulink-horizontal-reversed.webp" alt="Tu-Link" />
+                </span>
+                <span className="public-brand-context">Operations</span>
+              </a>
+              <nav className="public-nav" aria-label="Public navigation">
+                <a href="#capabilities">Capabilities</a>
+                <a href="/sign-in">Operator sign in</a>
+              </nav>
+              <div className="header-controls">
                 <SignInButton mode="modal">
                   <button className="tulink-button tulink-button-ghost">
                     Sign in
@@ -91,9 +123,9 @@ export default function RootLayout({
                 <SignUpButton mode="modal">
                   <button className="tulink-button">Create account</button>
                 </SignUpButton>
-              </SignedOut>
-            </div>
-          </header>
+              </div>
+            </header>
+          </SignedOut>
           {children}
         </ClerkProvider>
       </body>

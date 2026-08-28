@@ -1,6 +1,8 @@
 import { auth } from '@clerk/nextjs/server';
 import Link from 'next/link';
 import { operatorFetch } from '../operator-api';
+import type { LiveJourney } from './live/live-status';
+import { summarizeLiveFeed } from './live/live-status';
 
 interface OperatorJourney {
   id: string;
@@ -17,14 +19,12 @@ interface ApiResponse<T> {
   data: T;
 }
 
-async function getOrganizationJourneys(token: string) {
-  const response = await operatorFetch('/operator/journeys', token);
-
+async function getJson<T>(path: string, token: string) {
+  const response = await operatorFetch(path, token);
   if (!response.ok) {
     throw new Error(`Tulink API returned ${response.status}`);
   }
-
-  const payload = (await response.json()) as ApiResponse<OperatorJourney[]>;
+  const payload = (await response.json()) as ApiResponse<T>;
   return payload.data;
 }
 
@@ -57,6 +57,11 @@ export default async function DashboardPage() {
           <p className="eyebrow">Organization required</p>
           <h1>Select or create an organization</h1>
           <p>Journey visibility is always scoped to the active organization.</p>
+          <div className="empty-state-actions">
+            <Link className="tulink-button" href="/create-organization">
+              Create workspace
+            </Link>
+          </div>
         </section>
       </main>
     );
@@ -64,11 +69,15 @@ export default async function DashboardPage() {
 
   const token = await getToken();
   let journeys: OperatorJourney[] = [];
+  let liveJourneys: LiveJourney[] = [];
   let loadError = false;
 
   if (token) {
     try {
-      journeys = await getOrganizationJourneys(token);
+      [journeys, liveJourneys] = await Promise.all([
+        getJson<OperatorJourney[]>('/operator/journeys', token),
+        getJson<LiveJourney[]>('/operator/live-journeys', token),
+      ]);
     } catch {
       loadError = true;
     }
@@ -83,45 +92,45 @@ export default async function DashboardPage() {
   const pending = journeys.filter(
     (journey) => journey.status === 'PENDING' && !journey.scheduledFor,
   );
-  const recent = [...live, ...scheduled, ...pending].slice(0, 8);
-  const cards = [
-    {
-      label: 'Live journeys',
-      value: live.length,
-      detail: 'Teams currently moving',
-      tone: 'live',
-    },
-    {
-      label: 'Pending journeys',
-      value: pending.length,
-      detail: 'Created and waiting to start',
-      tone: 'pending',
-    },
-    {
-      label: 'Scheduled',
-      value: scheduled.length,
-      detail: 'Planned departures ahead',
-      tone: 'scheduled',
-    },
-  ];
+  const feed = summarizeLiveFeed(liveJourneys, Date.now());
+  const queue = [
+    ...feed.attentionJourneys.map((entry) => ({
+      id: entry.item.journey.id,
+      name: entry.item.journey.name,
+      destination: entry.item.journey.destinationAddress ?? 'Destination pending',
+      statusLabel: entry.status.attentionReasons.join(' · ') || 'Needs attention',
+      tone: 'attention' as const,
+      person: entry.status.leadName,
+    })),
+    ...[...live, ...scheduled, ...pending]
+      .filter(
+        (journey) =>
+          !feed.attentionJourneys.some(
+            (entry) => entry.item.journey.id === journey.id,
+          ),
+      )
+      .slice(0, 8)
+      .map((journey) => ({
+        id: journey.id,
+        name: journey.name,
+        destination: journey.destinationAddress ?? 'Destination pending',
+        statusLabel:
+          journey.status === 'ACTIVE'
+            ? 'On track'
+            : formatSchedule(journey.scheduledFor),
+        tone: journey.status === 'ACTIVE' ? ('healthy' as const) : ('neutral' as const),
+        person: null,
+      })),
+  ].slice(0, 8);
+
+  const reportingRatio =
+    feed.visibleMembers > 0
+      ? Math.round((feed.driversOnline / feed.visibleMembers) * 100)
+      : null;
 
   return (
     <main className="dashboard-shell">
-      <section className="dashboard-content">
-        <div className="dashboard-heading">
-          <div>
-            <p className="eyebrow">Organization command</p>
-            <h1>Operations control</h1>
-            <p className="page-intro">
-              Monitor active convoys, upcoming departures, and journeys that
-              need operator attention.
-            </p>
-          </div>
-          <span className={`live-badge ${loadError ? 'offline' : ''}`}>
-            {loadError ? 'Feed offline' : 'Live feed'}
-          </span>
-        </div>
-
+      <section className="dashboard-content overview-grid">
         {loadError ? (
           <div className="api-warning">
             The Tulink API is temporarily unavailable. Retry in a moment or
@@ -129,65 +138,104 @@ export default async function DashboardPage() {
           </div>
         ) : null}
 
+        {feed.attentionCount > 0 ? (
+          <aside className="attention-banner">
+            <div>
+              <strong>
+                {feed.attentionCount}{' '}
+                {feed.attentionCount === 1 ? 'journey needs' : 'journeys need'}{' '}
+                attention
+              </strong>
+              <p>{feed.reasons.join(' · ')}</p>
+            </div>
+            <Link className="tulink-button" href="/dashboard/live">
+              Review queue
+            </Link>
+          </aside>
+        ) : null}
+
         <div className="metric-grid">
-          {cards.map((card) => (
-            <article
-              key={card.label}
-              className={`tulink-panel metric-card ${card.tone}`}
-            >
-              <p>{card.label}</p>
-              <strong>{card.value}</strong>
-              <span>{card.detail}</span>
-            </article>
-          ))}
+          <article className="tulink-panel metric-card live">
+            <p>Active journeys</p>
+            <strong>{live.length}</strong>
+            <span>Teams currently moving</span>
+          </article>
+          <article className="tulink-panel metric-card pending">
+            <p>Exceptions</p>
+            <strong>{feed.attentionCount}</strong>
+            <span>Stale or offline live locations</span>
+          </article>
+          <article className="tulink-panel metric-card scheduled">
+            <p>Drivers online</p>
+            <strong>{feed.driversOnline}</strong>
+            <span>Reporting from active journeys</span>
+          </article>
         </div>
 
-        <section className="tulink-panel journey-panel">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Operational queue</p>
-              <h2>Open journeys</h2>
-            </div>
-            <div className="section-actions">
-              <span>{recent.length} visible</span>
+        <div className="overview-body">
+          <section className="tulink-panel journey-panel">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Operational queue</p>
+                <h2>Priority work queue</h2>
+              </div>
               <Link className="text-link" href="/dashboard/live">
                 Open live tracking
               </Link>
             </div>
-          </div>
 
-          {recent.length === 0 ? (
-            <div className="empty-state">
-              <h3>No open team journeys</h3>
-              <p>
-                Add Tulink app users to this organization to attribute their
-                next journeys automatically.
-              </p>
-            </div>
-          ) : (
-            <div className="journey-list">
-              {recent.map((journey) => (
-                <article key={journey.id} className="journey-row">
-                  <div>
-                    <span
-                      className={`status-dot ${journey.status.toLowerCase()}`}
-                    />
+            {queue.length === 0 ? (
+              <div className="empty-state">
+                <h3>No open team journeys</h3>
+                <p>
+                  Add Tulink app users to this organization to attribute their
+                  next journeys automatically.
+                </p>
+              </div>
+            ) : (
+              <div className="journey-list">
+                {queue.map((row) => (
+                  <article
+                    className={`queue-row ${row.tone}`}
+                    key={row.id}
+                  >
                     <div>
-                      <h3>{journey.name}</h3>
-                      <p>
-                        {journey.destinationAddress ?? 'Destination pending'}
-                      </p>
+                      <h3>{row.name}</h3>
+                      <p>{row.destination}</p>
                     </div>
-                  </div>
-                  <div className="journey-meta">
-                    <strong>{journey.status}</strong>
-                    <span>{formatSchedule(journey.scheduledFor)}</span>
-                  </div>
-                </article>
-              ))}
+                    <div className="journey-meta">
+                      <strong>{row.statusLabel}</strong>
+                      {row.person ? <span>{row.person}</span> : null}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <aside className="workspace-snapshot">
+            <p className="eyebrow">Workspace</p>
+            <h2>Live snapshot</h2>
+            <strong>{reportingRatio === null ? '—' : `${reportingRatio}%`}</strong>
+            <p>
+              {feed.visibleMembers === 0
+                ? 'No live participants reporting yet'
+                : 'Members reporting from active journeys'}
+            </p>
+            <div className="snapshot-bars" aria-hidden="true">
+              <span style={{ width: `${Math.min(100, live.length * 12 + 24)}%` }} />
+              <span style={{ width: `${Math.min(100, scheduled.length * 12 + 18)}%` }} />
+              <span
+                className="accent"
+                style={{ width: `${Math.min(100, feed.attentionCount * 18 + 16)}%` }}
+              />
+              <span style={{ width: `${Math.min(100, pending.length * 12 + 20)}%` }} />
             </div>
-          )}
-        </section>
+            <small>
+              {scheduled.length} scheduled · {pending.length} waiting to start
+            </small>
+          </aside>
+        </div>
       </section>
     </main>
   );

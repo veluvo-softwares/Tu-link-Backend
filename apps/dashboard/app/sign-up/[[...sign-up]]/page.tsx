@@ -5,5 +5,9 @@ export default function SignUpPage() {
     return <div style={{ padding: 48 }}>Sign-up will be enabled after Clerk is configured.</div>;
   }
 
-  return <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />;
+  return (
+    <main className="clerk-auth">
+      <SignUp routing="path" path="/sign-up" signInUrl="/sign-in" />
+    </main>
+  );
 }
