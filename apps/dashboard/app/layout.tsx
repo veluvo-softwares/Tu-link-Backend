@@ -99,15 +99,21 @@ export default function RootLayout({
           publishableKey={clerkPublishableKey}
           signInFallbackRedirectUrl="/dashboard"
           signInUrl="/sign-in"
-          signUpFallbackRedirectUrl="/dashboard"
+          signUpFallbackRedirectUrl="/create-organization"
           signUpUrl="/sign-up"
         >
           <SignedOut>
             <header className="public-header">
-              <a className="ops-brand public" href="/">
-                <strong>TU-LINK</strong>
-                <small>Operations</small>
+              <a className="public-brand" href="/" aria-label="Tu-Link Operations home">
+                <span className="public-brand-mark">
+                  <img src="/brand/tulink-horizontal-reversed.webp" alt="Tu-Link" />
+                </span>
+                <span className="public-brand-context">Operations</span>
               </a>
+              <nav className="public-nav" aria-label="Public navigation">
+                <a href="#capabilities">Capabilities</a>
+                <a href="/sign-in">Operator sign in</a>
+              </nav>
               <div className="header-controls">
                 <SignInButton mode="modal">
                   <button className="tulink-button tulink-button-ghost">

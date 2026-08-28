@@ -9,9 +9,9 @@
     "packages/*"
   ],
   "scripts": {
-    "start": "docker compose -p tulink up --build",
-    "stop": "docker compose -p tulink down --remove-orphans",
-    "dc": "docker compose -p tulink",
+    "start": "docker compose -p tulink-backend up --build",
+    "stop": "docker compose -p tulink-backend down --remove-orphans",
+    "dc": "docker compose -p tulink-backend",
     "build": "turbo run build",
     "build:api": "npm run build --workspace @tulink/api",
     "build:dashboard": "npm run build --workspace @tulink/dashboard",
@@ -25,10 +25,10 @@
     "db:generate": "npm run db:generate --workspace @tulink/api",
     "db:migrate": "npm run db:migrate --workspace @tulink/api",
     "db:push": "npm run db:push --workspace @tulink/api",
-    "docker:dev": "docker compose -p tulink up -d postgres redis",
-    "docker:build": "docker compose -p tulink build",
-    "docker:down": "docker compose -p tulink down --remove-orphans",
-    "docker:logs": "docker compose -p tulink logs -f",
+    "docker:dev": "docker compose -p tulink-backend up -d postgres redis",
+    "docker:build": "docker compose -p tulink-backend build",
+    "docker:down": "docker compose -p tulink-backend down --remove-orphans",
+    "docker:logs": "docker compose -p tulink-backend logs -f",
     "prepare": "husky"
   },
   "overrides": {

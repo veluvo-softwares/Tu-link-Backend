@@ -87,7 +87,7 @@ export function OpsChrome({
     <div className="ops-shell">
       <aside className={`ops-sidebar ${mobileOpen ? 'open' : ''}`}>
         <Link className="ops-brand" href="/dashboard" title={orgLabel}>
-          <strong>TU-LINK</strong>
+          <img className="ops-brand-logo" src="/brand/tulink-horizontal-reversed.webp" alt="Tu-Link" />
           <small>{orgLabel}</small>
         </Link>
 
@@ -131,6 +131,9 @@ export function OpsChrome({
           >
             Menu
           </button>
+          <Link className="ops-topbar-brand" href="/dashboard" aria-label="Tu-Link dashboard home">
+            <img src="/brand/tulink-horizontal-reversed.webp" alt="Tu-Link" />
+          </Link>
           <div className="ops-topbar-title">
             <h1>{current.label}</h1>
             <p>{current.context}</p>
@@ -138,6 +141,8 @@ export function OpsChrome({
           <div className="ops-topbar-controls">
             <OrganizationSwitcher
               afterCreateOrganizationUrl="/create-organization"
+              createOrganizationMode="navigation"
+              createOrganizationUrl="/create-organization"
               appearance={{
                 elements: {
                   rootBox: 'ops-org-switcher',

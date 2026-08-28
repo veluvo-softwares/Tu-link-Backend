@@ -57,6 +57,11 @@ export default async function DashboardPage() {
           <p className="eyebrow">Organization required</p>
           <h1>Select or create an organization</h1>
           <p>Journey visibility is always scoped to the active organization.</p>
+          <div className="empty-state-actions">
+            <Link className="tulink-button" href="/create-organization">
+              Create workspace
+            </Link>
+          </div>
         </section>
       </main>
     );
