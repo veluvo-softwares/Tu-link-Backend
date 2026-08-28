@@ -7,6 +7,18 @@ export default async function DashboardLayout({
 }: {
   children: ReactNode;
 }) {
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    return (
+      <main className="dashboard-shell">
+        <section className="tulink-panel empty-state">
+          <p className="eyebrow">Dashboard configuration required</p>
+          <h1>Clerk environment keys are missing.</h1>
+          <p>Add the dashboard authentication keys to access operator routes.</p>
+        </section>
+      </main>
+    );
+  }
+
   const chrome = await getOpsChromeProps();
 
   return (
