@@ -191,8 +191,8 @@ export default async function TeamPage({ searchParams }: TeamPageProps) {
       <section className="dashboard-content">
         <div className="team-hero">
           <div>
-            <p className="eyebrow">Organization directory</p>
-            <h1>Team &amp; access</h1>
+            <p className="eyebrow">People · Access</p>
+            <h1>Team</h1>
             <p className="hero-copy">
               Control who operates the dashboard and which {organizationName}{' '}
               journeys each person is responsible for.

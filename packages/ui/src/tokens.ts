@@ -1,24 +1,34 @@
-const canonicalColors = {
-  carbonBlack: '#0D0D0D',
-  graphite: '#1E1E1E',
-  brushedSteel: '#2A2A2A',
-  electricRed: '#E8002D',
-  silver: '#C8C8C8',
-  white: '#FFFFFF',
-  emberRed: '#B00022',
+const brandColors = {
+  deepTeal: '#075261',
+  routeTeal: '#12848d',
+  sunsetOrange: '#f35d32',
+  warmSand: '#f9f4f0',
+  journeyInk: '#1a1a19',
+  white: '#ffffff',
+  borderSoft: '#ded8d1',
+  success: '#1e8e63',
 } as const;
 
 export const tulinkTokens = {
   colors: {
-    ...canonicalColors,
-    /** @deprecated Use silver. */
-    warmSand: canonicalColors.silver,
-    /** @deprecated Use white. */
-    ivory: canonicalColors.white,
+    ...brandColors,
+    /** @deprecated Use deepTeal. */
+    carbonBlack: brandColors.deepTeal,
+    /** @deprecated Use deepTeal. */
+    graphite: brandColors.deepTeal,
+    /** @deprecated Use deepTeal. */
+    brushedSteel: brandColors.deepTeal,
+    /** @deprecated Use sunsetOrange. */
+    electricRed: brandColors.sunsetOrange,
+    /** @deprecated Use borderSoft. */
+    silver: brandColors.borderSoft,
+    /** @deprecated Use sunsetOrange. */
+    emberRed: brandColors.sunsetOrange,
+    ivory: brandColors.white,
   },
   fonts: {
-    display: '"Rajdhani", "Arial Narrow", sans-serif',
-    badge: '"Bebas Neue", "Impact", sans-serif',
-    body: 'Inter, system-ui, sans-serif',
+    display: '"Manrope", "Helvetica Neue", sans-serif',
+    badge: '"Manrope", "Helvetica Neue", sans-serif',
+    body: '"Manrope", "Helvetica Neue", sans-serif',
   },
 } as const;
