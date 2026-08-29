@@ -1077,6 +1077,11 @@ export class LocationGateway
       .emit('participant-accepted', { ...data, journeyId });
   }
 
+  async broadcastRouteUpdated(journeyId: string, data: object) {
+    await this.logRoomMembers(journeyId, 'route-updated');
+    this.server.to(`journey:${journeyId}`).emit('route-updated', data);
+  }
+
   /**
    * Push a journey invite to all of the invited user's connected sockets so
    * their invite list updates live. FCM covers the case where the user has no

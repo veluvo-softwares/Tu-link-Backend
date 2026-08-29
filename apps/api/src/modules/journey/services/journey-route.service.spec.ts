@@ -60,6 +60,8 @@ describe('JourneyRouteService', () => {
   let journeyRepository: { findById: jest.Mock };
   let participantService: { isParticipant: jest.Mock };
   let mapsService: { getRoute: jest.Mock };
+  let locationGateway: { broadcastRouteUpdated: jest.Mock };
+  let logger: { error: jest.Mock };
 
   beforeEach(() => {
     routeRepository = {
@@ -81,12 +83,18 @@ describe('JourneyRouteService', () => {
     mapsService = {
       getRoute: jest.fn().mockResolvedValue(calculatedRoute),
     };
+    locationGateway = {
+      broadcastRouteUpdated: jest.fn().mockResolvedValue(undefined),
+    };
+    logger = { error: jest.fn() };
 
     service = new JourneyRouteService(
       routeRepository as never,
       journeyRepository as never,
       participantService as never,
       mapsService as never,
+      locationGateway as never,
+      logger as never,
     );
   });
 
@@ -132,6 +140,15 @@ describe('JourneyRouteService', () => {
       createdBy: leaderId,
       requestId,
     });
+    expect(locationGateway.broadcastRouteUpdated).toHaveBeenCalledWith(
+      journeyId,
+      {
+        journeyId,
+        routeVersion: 1,
+        reason: 'INITIAL',
+        updatedAt: savedRoute.createdAt.toISOString(),
+      },
+    );
   });
 
   it('returns an idempotent result without recalculating the route', async () => {
@@ -143,6 +160,7 @@ describe('JourneyRouteService', () => {
     expect(routeRepository.findCurrent).not.toHaveBeenCalled();
     expect(mapsService.getRoute).not.toHaveBeenCalled();
     expect(routeRepository.replaceCurrent).not.toHaveBeenCalled();
+    expect(locationGateway.broadcastRouteUpdated).not.toHaveBeenCalled();
   });
 
   it('rejects canonical route changes from a follower', async () => {
@@ -228,5 +246,21 @@ describe('JourneyRouteService', () => {
       service.replaceCurrent(journeyId, leaderId, dto),
     ).rejects.toBeInstanceOf(BadGatewayException);
     expect(routeRepository.replaceCurrent).not.toHaveBeenCalled();
+  });
+
+  it('keeps a committed route successful when its socket signal fails', async () => {
+    locationGateway.broadcastRouteUpdated.mockRejectedValue(
+      new Error('socket unavailable'),
+    );
+
+    await expect(
+      service.replaceCurrent(journeyId, leaderId, dto),
+    ).resolves.toBe(savedRoute);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining(journeyId),
+      expect.any(String),
+      'JourneyRouteService',
+      { journeyId, routeVersion: 1 },
+    );
   });
 });

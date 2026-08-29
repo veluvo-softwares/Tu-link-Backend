@@ -3,6 +3,8 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  forwardRef,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -13,6 +15,8 @@ import {
 } from '../../../database/repositories/journey-route.repository';
 import { JourneyRepository } from '../../../database/repositories/journey.repository';
 import { MapsService } from '../../maps/services/maps.service';
+import { LocationGateway } from '../../location/location.gateway';
+import { LoggerService } from '../../../shared/logger/logger.service';
 import { UpsertJourneyRouteDto } from '../dto/upsert-journey-route.dto';
 import { ParticipantService } from './participant.service';
 
@@ -23,6 +27,9 @@ export class JourneyRouteService {
     private readonly journeyRepository: JourneyRepository,
     private readonly participantService: ParticipantService,
     private readonly mapsService: MapsService,
+    @Inject(forwardRef(() => LocationGateway))
+    private readonly locationGateway: LocationGateway,
+    private readonly logger: LoggerService,
   ) {}
 
   async getCurrent(
@@ -99,7 +106,7 @@ export class JourneyRouteService {
     }
 
     try {
-      return await this.routeRepository.replaceCurrent({
+      const saved = await this.routeRepository.replaceCurrent({
         journeyId,
         baseVersion: dto.baseVersion,
         coordinates: route.coordinates,
@@ -112,6 +119,24 @@ export class JourneyRouteService {
         createdBy: userId,
         requestId: dto.requestId,
       });
+      try {
+        await this.locationGateway.broadcastRouteUpdated(journeyId, {
+          journeyId,
+          routeVersion: saved.version,
+          reason: saved.reason,
+          updatedAt: saved.createdAt.toISOString(),
+        });
+      } catch (error) {
+        // The route is already committed. Snapshot reconciliation guarantees
+        // convergence even if this best-effort low-latency signal fails.
+        this.logger.error(
+          `Route update broadcast failed for journey ${journeyId}`,
+          error instanceof Error ? error.stack : undefined,
+          'JourneyRouteService',
+          { journeyId, routeVersion: saved.version },
+        );
+      }
+      return saved;
     } catch (error) {
       if (error instanceof JourneyRouteVersionConflictError) {
         throw this.versionConflict(error.currentVersion);

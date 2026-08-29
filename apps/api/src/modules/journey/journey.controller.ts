@@ -25,6 +25,7 @@ import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { InviteParticipantByIdDto } from './dto/invite-participant.dto';
 import { UpsertJourneyRouteDto } from './dto/upsert-journey-route.dto';
 import { JourneyRouteService } from './services/journey-route.service';
+import { JourneyLiveService } from './services/journey-live.service';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -37,6 +38,7 @@ export class JourneyController {
     private journeyService: JourneyService,
     private participantService: ParticipantService,
     private journeyRouteService: JourneyRouteService,
+    private journeyLiveService: JourneyLiveService,
   ) {}
 
   @Post()
@@ -129,6 +131,20 @@ export class JourneyController {
   @ApiResponse({ status: 404, description: 'Journey not found' })
   async getRoute(@Param('id') id: string, @CurrentUser('uid') userId: string) {
     return this.journeyRouteService.getCurrent(id, userId);
+  }
+
+  @Get(':id/live')
+  @ApiOperation({
+    summary: 'Get the authoritative live journey recovery snapshot',
+  })
+  @ApiResponse({ status: 200, description: 'Complete live journey snapshot' })
+  @ApiResponse({ status: 403, description: 'Not a journey participant' })
+  @ApiResponse({ status: 404, description: 'Journey not found' })
+  async getLiveSnapshot(
+    @Param('id') id: string,
+    @CurrentUser('uid') userId: string,
+  ) {
+    return this.journeyLiveService.getSnapshot(id, userId);
   }
 
   @Post(':id/route')
