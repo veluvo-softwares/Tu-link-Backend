@@ -34,7 +34,16 @@ async function getLandingState(): Promise<LandingState> {
   const sessionToken = await clerkAuth.getToken();
 
   if (!sessionToken) {
-    return { isSignedIn: true, apiError: true, session: null };
+    return {
+      isSignedIn: true,
+      apiError: true,
+      session: {
+        userId: clerkAuth.userId,
+        orgId: clerkAuth.orgId ?? null,
+        orgSlug: clerkAuth.orgSlug ?? null,
+        sync: null,
+      },
+    };
   }
 
   try {
@@ -46,13 +55,31 @@ async function getLandingState(): Promise<LandingState> {
     });
 
     if (!response.ok) {
-      return { isSignedIn: true, apiError: true, session: null };
+      return {
+        isSignedIn: true,
+        apiError: true,
+        session: {
+          userId: clerkAuth.userId,
+          orgId: clerkAuth.orgId ?? null,
+          orgSlug: clerkAuth.orgSlug ?? null,
+          sync: null,
+        },
+      };
     }
 
     const session = (await response.json()) as LandingSession;
     return { isSignedIn: true, apiError: false, session };
   } catch {
-    return { isSignedIn: true, apiError: true, session: null };
+    return {
+      isSignedIn: true,
+      apiError: true,
+      session: {
+        userId: clerkAuth.userId,
+        orgId: clerkAuth.orgId ?? null,
+        orgSlug: clerkAuth.orgSlug ?? null,
+        sync: null,
+      },
+    };
   }
 }
 
@@ -78,7 +105,7 @@ export default async function DashboardHomePage() {
                 </Link>
               ) : (
                 <Link className="tulink-button" href="/create-organization">
-                  Create workspace
+                  Set up workspace
                 </Link>
               )
             ) : (
@@ -209,8 +236,21 @@ export default async function DashboardHomePage() {
 
       <section className="public-cta-panel">
         <div><p className="eyebrow">Start with a clear workspace</p><h2>Your next shift starts here.</h2></div>
-        <Link className="tulink-button" href={state.isSignedIn ? '/create-organization' : '/sign-up'}>
-          {state.isSignedIn ? 'Create workspace' : 'Create account'}
+        <Link
+          className="tulink-button"
+          href={
+            state.isSignedIn
+              ? hasOrganization
+                ? '/dashboard'
+                : '/create-organization'
+              : '/sign-up'
+          }
+        >
+          {state.isSignedIn
+            ? hasOrganization
+              ? 'Open operations'
+              : 'Set up workspace'
+            : 'Get started'}
         </Link>
       </section>
     </main>
