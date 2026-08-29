@@ -238,10 +238,10 @@ export class MapsService {
   ): Promise<RouteResult | null> {
     // Route origins need street-level identity. Two decimal places groups
     // points roughly a kilometre apart and can return a route that begins on a
-    // different road; four decimal places is about 11 m at the equator.
+    // different road; six decimal places preserves sub-metre GPS identity.
     const cacheKey =
-      `maps:route:${originLat.toFixed(4)}:${originLng.toFixed(4)}` +
-      `:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
+      `maps:route:${originLat.toFixed(6)}:${originLng.toFixed(6)}` +
+      `:${destLat.toFixed(6)}:${destLng.toFixed(6)}`;
 
     const redisClient = this.redisService.getClient();
     const cached = await redisClient.get(cacheKey);

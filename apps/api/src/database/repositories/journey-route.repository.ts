@@ -45,6 +45,13 @@ export class JourneyRouteVersionConflictError extends Error {
   }
 }
 
+export class JourneyRouteInactiveError extends Error {
+  constructor() {
+    super('Canonical routes can only be updated for active journeys');
+    this.name = 'JourneyRouteInactiveError';
+  }
+}
+
 type SelectedRoute = {
   id: string;
   journeyId: string;
@@ -153,11 +160,17 @@ export class JourneyRouteRepository {
     input: ReplaceJourneyRouteInput,
   ): Promise<JourneyRouteRecord> {
     return this.db.transaction(async (tx) => {
-      await tx
-        .select({ id: journeys.id })
+      const [lockedJourney] = await tx
+        .select({ id: journeys.id, status: journeys.status })
         .from(journeys)
         .where(eq(journeys.id, input.journeyId))
         .for('update');
+
+      // Mapbox calculation happens before this transaction. Revalidate while
+      // holding the journey lock so a route cannot be committed after end().
+      if (!lockedJourney || lockedJourney.status !== 'ACTIVE') {
+        throw new JourneyRouteInactiveError();
+      }
 
       const [duplicate] = await tx
         .select(this.selection())
