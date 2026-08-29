@@ -236,9 +236,11 @@ export class MapsService {
     destLat: number,
     destLng: number,
   ): Promise<RouteResult | null> {
-    // Cache key: 2dp origin (moving driver), 4dp dest (fixed)
+    // Route origins need street-level identity. Two decimal places groups
+    // points roughly a kilometre apart and can return a route that begins on a
+    // different road; four decimal places is about 11 m at the equator.
     const cacheKey =
-      `maps:route:${originLat.toFixed(2)}:${originLng.toFixed(2)}` +
+      `maps:route:${originLat.toFixed(4)}:${originLng.toFixed(4)}` +
       `:${destLat.toFixed(4)}:${destLng.toFixed(4)}`;
 
     const redisClient = this.redisService.getClient();
