@@ -10,6 +10,8 @@ import { RedisModule } from '../../shared/redis/redis.module';
 import { NotificationModule } from '../notification/notification.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { LocationModule } from '../location/location.module';
+import { MapsModule } from '../maps/maps.module';
+import { JourneyRouteService } from './services/journey-route.service';
 import appConfig from '../../config/app.config';
 
 @Module({
@@ -20,6 +22,7 @@ import appConfig from '../../config/app.config';
     NotificationModule,
     AnalyticsModule,
     forwardRef(() => LocationModule),
+    MapsModule,
   ],
   controllers: [JourneyController],
   providers: [
@@ -27,6 +30,7 @@ import appConfig from '../../config/app.config';
     ParticipantService,
     JourneyMetricsService,
     JourneySchedulerService,
+    JourneyRouteService,
   ],
   exports: [JourneyService, ParticipantService, JourneyMetricsService],
 })
