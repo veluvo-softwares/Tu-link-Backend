@@ -5,6 +5,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import {
+  JourneyRouteInactiveError,
   JourneyRouteVersionConflictError,
   type JourneyRouteRecord,
 } from '../../../database/repositories/journey-route.repository';
@@ -219,6 +220,16 @@ describe('JourneyRouteService', () => {
       code: 'ROUTE_VERSION_CONFLICT',
       currentVersion: 1,
     });
+  });
+
+  it('rejects a route when the journey ends during calculation', async () => {
+    routeRepository.replaceCurrent.mockRejectedValue(
+      new JourneyRouteInactiveError(),
+    );
+
+    await expect(
+      service.replaceCurrent(journeyId, leaderId, dto),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('fails clearly when Mapbox returns no road route', async () => {

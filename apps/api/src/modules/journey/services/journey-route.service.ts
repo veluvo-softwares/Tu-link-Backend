@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import {
   JourneyRouteRecord,
+  JourneyRouteInactiveError,
   JourneyRouteRepository,
   JourneyRouteVersionConflictError,
 } from '../../../database/repositories/journey-route.repository';
@@ -113,6 +114,9 @@ export class JourneyRouteService {
         requestId: dto.requestId,
       });
     } catch (error) {
+      if (error instanceof JourneyRouteInactiveError) {
+        throw new BadRequestException(error.message);
+      }
       if (error instanceof JourneyRouteVersionConflictError) {
         throw this.versionConflict(error.currentVersion);
       }
