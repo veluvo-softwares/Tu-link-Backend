@@ -2,7 +2,8 @@
 
 Last updated: 2026-08-30  
 Owner: Tulink mobile and backend teams  
-Status: Implemented on stacked local branches; not yet pushed or deployed
+Status: Implementation PRs are merging to `main`; staging promotions and
+physical-device validation remain open
 
 ## Purpose
 
@@ -58,33 +59,36 @@ and its network connection. The reliable model is:
 | LC-16 | Location response envelope handling was inconsistent | The legacy recovery fallback could parse an empty snapshot | Unwrap the standard API `data` envelope in the convoy API service | Fixed |
 | LC-17 | Terminal/late work could publish into the wrong journey | A delayed permission or GPS result could revive a completed/switched journey | Use monotonic ownership generations and terminal reconciliation | Fixed |
 | LC-18 | Background execution is constrained by OS/user settings | Force-stop, revoked permission, battery policy, or iOS termination can still halt live collection | Surface health/freshness, recover on next launch/resume, and follow the incident/device checklist below | Known platform constraint |
+| LC-19 | Malformed canonical route payloads could throw during cache persistence | An empty or invalid geometry could leave the live map without a route and surface an unhandled async error | Validate route versions, guard empty geometry, and contain remote/local route failures with canonical-cache fallback | Fixed |
+| LC-20 | A follower that missed the first `route-updated` event did not retry | The follower could remain centered on the destination without a polyline or guidance | Add a journey-scoped, bounded canonical-route retry that cancels on success, switch, terminal state, or disposal | Fixed |
+| LC-21 | Canonical route repository contracts still expose nullable data models across the domain boundary | “No committed route” and a request failure are not fully distinguishable, increasing maintenance risk | Track a follow-up to introduce a domain route entity and `Result` contract without expanding the release-critical change | Follow-up; not a runtime release blocker |
+| LC-22 | Leader reroute drawing re-fetches the route it just committed | One redundant request and duplicate navigation assignment occur on reroute | Track a follow-up to draw the returned committed route directly | Follow-up performance cleanup |
 
 ## Implemented PR stack
 
-These branches are intentionally stacked. Merge each repository in the listed
-order, or rebase each later branch after the preceding PR lands.
+The implementation was delivered as stacked PRs and merged in dependency order.
 
 ### Backend
 
-1. `codex/feat-versioned-convoy-routes` — `b9e6a81`
+1. [Backend PR #120](https://github.com/veluvo-softwares/Tu-link-Backend/pull/120) — merged to `main`
    - Route schema and migration.
    - `GET/POST /journeys/:id/route`.
    - Leader authorization, server-owned destination/Mapbox calculation,
      idempotency, locking, and version conflict handling.
-2. `codex/feat-live-journey-snapshot` — `501d233`
+2. [Backend PR #121](https://github.com/veluvo-softwares/Tu-link-Backend/pull/121) — merged to `main`
    - `GET /journeys/:id/live` with journey, canonical route, active roster,
      nullable member locations, freshness, cursor, and generation time.
    - Best-effort `route-updated` Socket.IO event after route commit.
-3. `codex/docs-live-convoy-reliability` — this document.
+3. [Backend PR #122](https://github.com/veluvo-softwares/Tu-link-Backend/pull/122) — this runbook and rollout record.
 
 ### Flutter
 
-1. `codex/refactor-shared-journey-location` — `e773f96`
+1. [Flutter PR #123](https://github.com/veluvo-softwares/tulink_flutter/pull/123) — merged to `main`
    - One shared native journey location stream and background settings.
-2. `codex/feat-app-live-journey-coordinator` — `60000cc`
+2. [Flutter PR #124](https://github.com/veluvo-softwares/tulink_flutter/pull/124) — merged to `main`
    - App-scoped lifecycle ownership and resume recovery; UI transport ownership
      removed.
-3. `codex/feat-canonical-live-routes` — `c805a94`
+3. [Flutter PR #125](https://github.com/veluvo-softwares/tulink_flutter/pull/125) — canonical route/recovery implementation
    - Canonical route GET/write, version conflict convergence, leader-only
      rerouting, `route-updated` handling, live snapshot recovery, cache identity,
      and regression coverage.
@@ -271,11 +275,13 @@ needs an update. Add a dated row to the change log below.
 
 As of 2026-08-30:
 
-- Backend: lint, typecheck, and production build passed.
-- Backend: 19 suites and 129 tests passed.
-- Flutter: 493 tests passed and 14 intentional tests were skipped.
-- Scoped Dart analysis reported no errors. The repository still has a pre-existing
-  lint backlog.
+- Backend: lint, typecheck, migrations against PostGIS, security scan, and
+  production/Docker builds passed in CI.
+- Backend: 20 suites and 127 tests passed.
+- Flutter: 496 tests passed and 14 intentional tests were skipped after the
+  final canonical-route review fixes.
+- Scoped Dart analysis reported no errors. The repository still has a
+  pre-existing warning/lint backlog.
 - The local Flutter SDK's `flutter analyze` launcher is missing its analysis
   server snapshot; `dart analyze` was used for changed-file validation.
 - Physical screen-off/background acceptance and production smoke tests remain
@@ -285,7 +291,7 @@ As of 2026-08-30:
 
 | Date | Type | Reference | Summary | Follow-up |
 |---|---|---|---|---|
-| 2026-08-30 | Implementation | Backend `b9e6a81`, `501d233`; Flutter `e773f96`, `60000cc`, `c805a94` | Added app-owned lifecycle, shared background location, authoritative recovery, and versioned canonical routes | Push PR stack, deploy backend-first, complete physical-device matrix |
+| 2026-08-30 | Implementation | Backend PRs #120–#122; Flutter PRs #123–#125 | Added app-owned lifecycle, shared background location, authoritative recovery, versioned canonical routes, malformed-payload containment, and bounded follower recovery | Promote backend `main` to `dev`, promote Flutter `main` to `develop`, then complete the physical-device matrix |
 
 For every later production issue, append a row with the incident/ticket link,
 affected releases, root cause, mitigation, fix PR, and validation result.
