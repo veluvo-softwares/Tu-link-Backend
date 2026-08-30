@@ -2,7 +2,7 @@
 
 Last updated: 2026-08-30  
 Owner: Tulink mobile and backend teams  
-Status: Implementation PRs are merging to `main`; staging promotions and
+Status: Code implementation is merged to `main`; staging promotions and
 physical-device validation remain open
 
 ## Purpose
@@ -48,7 +48,7 @@ and its network connection. The reliable model is:
 | LC-05 | Joining the room could sit behind GPS acquisition or permission UI | Users remained in `CONNECTING` even though convoy membership did not require a fix | Join and subscribe first; treat location permission/fix as an independent recoverable channel | Fixed |
 | LC-06 | Map widgets could start/stop transport and open their own continuous stream | Rebuilds could duplicate or tear down live infrastructure | Remove transport ownership and continuous GPS calls from live map widgets; add an architecture regression test | Fixed |
 | LC-07 | Resume depended on opening the journey screen | Peers, self-location, and map state stayed stale until manual reload | App coordinator refreshes active journeys, restores ownership, and runs a coalesced recovery transaction on resume | Fixed |
-| LC-08 | Recovery used a locations-only endpoint | It could not authoritatively recover roster, route version, freshness, or cursor together | Add `GET /journeys/:id/live` and make Flutter prefer it, with an old-server 404 fallback | Fixed |
+| LC-08 | Recovery used a locations-only endpoint | It could not authoritatively recover roster, route version, freshness, or cursor together | Add `GET /journeys/:id/live` and make Flutter prefer it, with fallback only for Nest's explicit unregistered-route response | Fixed |
 | LC-09 | Each client calculated a route locally | Members could see different polylines and reroutes | Store one canonical server-calculated route per journey and have all clients fetch it | Fixed |
 | LC-10 | Route writes had no concurrency contract | Competing reroutes could overwrite each other | Add monotonically increasing versions, leader-only writes, request UUID idempotency, row locking, and compare-and-swap `baseVersion` | Fixed |
 | LC-11 | Followers could reroute independently | Convoy members could diverge after off-route detection | Only the leader may create `INITIAL` or `LEADER_REROUTE` route versions | Fixed |
@@ -63,10 +63,12 @@ and its network connection. The reliable model is:
 | LC-20 | A follower that missed the first `route-updated` event did not retry | The follower could remain centered on the destination without a polyline or guidance | Add a journey-scoped, bounded canonical-route retry that cancels on success, switch, terminal state, or disposal | Fixed |
 | LC-21 | Canonical route repository contracts still expose nullable data models across the domain boundary | “No committed route” and a request failure are not fully distinguishable, increasing maintenance risk | Track a follow-up to introduce a domain route entity and `Result` contract without expanding the release-critical change | Follow-up; not a runtime release blocker |
 | LC-22 | Leader reroute drawing re-fetches the route it just committed | One redundant request and duplicate navigation assignment occur on reroute | Track a follow-up to draw the returned committed route directly | Follow-up performance cleanup |
+| LC-23 | Every live-snapshot `404` triggered the old-server fallback | A deleted or invalid journey could be misread as an older backend and lose terminal error semantics | Fall back only for Nest's explicit `Cannot GET .../live` unsupported-endpoint response; preserve `Journey not found` as terminal | Fixed |
 
 ## Implemented PR stack
 
-The implementation was delivered as stacked PRs and merged in dependency order.
+The code implementation was delivered as stacked PRs and merged in dependency
+order. This runbook is the final delivery record.
 
 ### Backend
 
@@ -88,7 +90,7 @@ The implementation was delivered as stacked PRs and merged in dependency order.
 2. [Flutter PR #124](https://github.com/veluvo-softwares/tulink_flutter/pull/124) — merged to `main`
    - App-scoped lifecycle ownership and resume recovery; UI transport ownership
      removed.
-3. [Flutter PR #125](https://github.com/veluvo-softwares/tulink_flutter/pull/125) — canonical route/recovery implementation
+3. [Flutter PR #125](https://github.com/veluvo-softwares/tulink_flutter/pull/125) — merged to `main`
    - Canonical route GET/write, version conflict convergence, leader-only
      rerouting, `route-updated` handling, live snapshot recovery, cache identity,
      and regression coverage.
@@ -149,9 +151,10 @@ before the route migration and endpoints are healthy in production.
 8. Run the device acceptance matrix and watch the indicators below before full
    rollout.
 
-The Flutter client has a 404 fallback to the older latest-locations endpoint,
-which protects a rolling backend deployment. That fallback is for compatibility,
-not the target steady state.
+The Flutter client falls back to the older latest-locations endpoint only when
+Nest explicitly reports that `/journeys/:id/live` is not registered. A real
+`Journey not found` response remains terminal. The fallback protects a rolling
+backend deployment; it is not the target steady state.
 
 ## Release acceptance matrix
 
@@ -278,8 +281,9 @@ As of 2026-08-30:
 - Backend: lint, typecheck, migrations against PostGIS, security scan, and
   production/Docker builds passed in CI.
 - Backend: 20 suites and 127 tests passed.
-- Flutter: 496 tests passed and 14 intentional tests were skipped after the
-  final canonical-route review fixes.
+- Flutter: 497 tests passed and 14 intentional tests were skipped at commit
+  `bbb1209`; Android and iOS CI passed in
+  [run 33300975813](https://github.com/veluvo-softwares/tulink_flutter/actions/runs/33300975813).
 - Scoped Dart analysis reported no errors. The repository still has a
   pre-existing warning/lint backlog.
 - The local Flutter SDK's `flutter analyze` launcher is missing its analysis
