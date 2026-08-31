@@ -40,6 +40,13 @@ export const connectionStatusEnum = pgEnum('connection_status', [
 // src/types/priority.type.ts
 export const priorityEnum = pgEnum('priority', ['LOW', 'MEDIUM', 'HIGH']);
 
+// Why the leader replaced the canonical route followed by the convoy.
+export const journeyRouteReasonEnum = pgEnum('journey_route_reason', [
+  'INITIAL',
+  'LEADER_REROUTE',
+  'MANUAL',
+]);
+
 // src/types/notification.type.ts (NotificationType)
 // NOTE: includes PARTICIPANT_LEFT, which the plan's §4 DDL omitted. The TS
 // type is the source of truth, so it is included here.

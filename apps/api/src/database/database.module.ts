@@ -5,6 +5,7 @@ import { DatabaseService } from './database.service';
 import { AnalyticsRepository } from './repositories/analytics.repository';
 import { FcmTokenRepository } from './repositories/fcm-token.repository';
 import { JourneyRepository } from './repositories/journey.repository';
+import { JourneyRouteRepository } from './repositories/journey-route.repository';
 import { LagAlertRepository } from './repositories/lag-alert.repository';
 import { LocationRepository } from './repositories/location.repository';
 import { NotificationRepository } from './repositories/notification.repository';
@@ -15,6 +16,7 @@ import { UsersRepository } from './repositories/users.repository';
 const repositories = [
   UsersRepository,
   JourneyRepository,
+  JourneyRouteRepository,
   ParticipantRepository,
   LocationRepository,
   LagAlertRepository,

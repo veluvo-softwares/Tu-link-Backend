@@ -23,6 +23,9 @@ import { ParticipantService } from './services/participant.service';
 import { CreateJourneyDto } from './dto/create-journey.dto';
 import { UpdateJourneyDto } from './dto/update-journey.dto';
 import { InviteParticipantByIdDto } from './dto/invite-participant.dto';
+import { UpsertJourneyRouteDto } from './dto/upsert-journey-route.dto';
+import { JourneyRouteService } from './services/journey-route.service';
+import { JourneyLiveService } from './services/journey-live.service';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -34,6 +37,8 @@ export class JourneyController {
   constructor(
     private journeyService: JourneyService,
     private participantService: ParticipantService,
+    private journeyRouteService: JourneyRouteService,
+    private journeyLiveService: JourneyLiveService,
   ) {}
 
   @Post()
@@ -117,6 +122,44 @@ export class JourneyController {
     @CurrentUser('uid') userId: string,
   ) {
     return this.journeyService.getJourneyWithParticipants(id, userId);
+  }
+
+  @Get(':id/route')
+  @ApiOperation({ summary: 'Get the current canonical convoy route' })
+  @ApiResponse({ status: 200, description: 'Current route or null' })
+  @ApiResponse({ status: 403, description: 'Not a journey participant' })
+  @ApiResponse({ status: 404, description: 'Journey not found' })
+  async getRoute(@Param('id') id: string, @CurrentUser('uid') userId: string) {
+    return this.journeyRouteService.getCurrent(id, userId);
+  }
+
+  @Get(':id/live')
+  @ApiOperation({
+    summary: 'Get the authoritative live journey recovery snapshot',
+  })
+  @ApiResponse({ status: 200, description: 'Complete live journey snapshot' })
+  @ApiResponse({ status: 403, description: 'Not a journey participant' })
+  @ApiResponse({ status: 404, description: 'Journey not found' })
+  async getLiveSnapshot(
+    @Param('id') id: string,
+    @CurrentUser('uid') userId: string,
+  ) {
+    return this.journeyLiveService.getSnapshot(id, userId);
+  }
+
+  @Post(':id/route')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Create or replace the canonical convoy route' })
+  @ApiResponse({ status: 200, description: 'Canonical route saved' })
+  @ApiResponse({ status: 400, description: 'Journey is not active' })
+  @ApiResponse({ status: 403, description: 'Only the leader may reroute' })
+  @ApiResponse({ status: 409, description: 'Route version conflict' })
+  async replaceRoute(
+    @Param('id') id: string,
+    @CurrentUser('uid') userId: string,
+    @Body() dto: UpsertJourneyRouteDto,
+  ) {
+    return this.journeyRouteService.replaceCurrent(id, userId, dto);
   }
 
   @Put(':id')
