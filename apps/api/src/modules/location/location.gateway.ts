@@ -53,6 +53,23 @@ interface SocketAuthErrorData {
   message: string;
 }
 
+interface JoinJourneyPayload {
+  journeyId: string;
+  lastLocationSequence?: number;
+}
+
+type JoinRecovery =
+  | {
+      mode: 'DELTA';
+      updates: unknown[];
+      nextSequence: number;
+      hasMore: false;
+    }
+  | {
+      mode: 'SNAPSHOT_REQUIRED';
+      reason: 'NO_CURSOR' | 'CURSOR_TOO_OLD' | 'RECOVERY_FAILED';
+    };
+
 function createSocketAuthError(
   code: SocketAuthErrorCode,
   message: string,
@@ -340,7 +357,7 @@ export class LocationGateway
   @SubscribeMessage('join-journey')
   async handleJoinJourney(
     @ConnectedSocket() client: Socket,
-    @MessageBody() payload: { journeyId: string },
+    @MessageBody() payload: JoinJourneyPayload,
   ) {
     const userId = client.data.userId;
     const { journeyId } = payload;
@@ -384,11 +401,27 @@ export class LocationGateway
 
       console.log(`User ${userId} joined journey ${journeyId}`);
 
+      // Recover missed location updates as part of the room handshake. Socket
+      // transport recovery cannot safely span an app suspension or process
+      // death, so the client presents its durable sequence cursor. A bounded
+      // delta keeps normal resumes fast; larger gaps are repaired by the
+      // canonical /live snapshot instead of replaying an unbounded history.
+      const recovery = await this.buildJoinRecovery(
+        userId,
+        journeyId,
+        payload.lastLocationSequence,
+      );
+      this.logger.info(
+        `Join recovery journey=${journeyId} user=${userId} mode=${recovery.mode} updates=${recovery.mode === 'DELTA' ? recovery.updates.length : 0}`,
+        'LocationGateway',
+      );
+
       // Send success response
       client.emit('joined-journey', {
         journeyId,
         message: 'Successfully joined journey',
         timestamp: Date.now(),
+        recovery,
       });
 
       // Notify other participants
@@ -412,6 +445,43 @@ export class LocationGateway
         message: error.message || 'Failed to join journey',
         timestamp: Date.now(),
       });
+    }
+  }
+
+  private async buildJoinRecovery(
+    userId: string,
+    journeyId: string,
+    lastLocationSequence?: number,
+  ): Promise<JoinRecovery> {
+    if (
+      !Number.isSafeInteger(lastLocationSequence) ||
+      (lastLocationSequence ?? 0) <= 0
+    ) {
+      return { mode: 'SNAPSHOT_REQUIRED', reason: 'NO_CURSOR' };
+    }
+
+    try {
+      const page = await this.locationService.handleResyncRequest(
+        userId,
+        journeyId,
+        lastLocationSequence!,
+        500,
+      );
+      if (page.hasMore) {
+        return { mode: 'SNAPSHOT_REQUIRED', reason: 'CURSOR_TOO_OLD' };
+      }
+      return {
+        mode: 'DELTA',
+        updates: page.updates,
+        nextSequence: page.nextSequence,
+        hasMore: false,
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Join recovery failed for journey ${journeyId}, user ${userId}: ${(error as Error).message}`,
+        'LocationGateway',
+      );
+      return { mode: 'SNAPSHOT_REQUIRED', reason: 'RECOVERY_FAILED' };
     }
   }
 
