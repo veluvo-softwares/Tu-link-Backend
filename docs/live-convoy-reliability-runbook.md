@@ -1,9 +1,10 @@
 # Live Convoy Reliability: Design, Delivery, and Production Runbook
 
-Last updated: 2026-08-30  
+Last updated: 2026-09-01
 Owner: Tulink mobile and backend teams  
-Status: Code implementation is merged to `main`; staging promotions and
-physical-device validation remain open
+Status: The first reliability stack is in production. Lifecycle v2 is being
+implemented on dedicated Flutter and backend branches; physical driving and
+screen-off validation remain release gates.
 
 ## Purpose
 
@@ -34,7 +35,7 @@ and its network connection. The reliable model is:
 1. one OS-supported background location stream per active journey;
 2. one app-scoped live journey coordinator, independent of map visibility;
 3. Socket.IO for low-latency hints while the process is runnable;
-4. a versioned server-owned route and authoritative recovery snapshot;
+4. an authoritative journey snapshot plus durable location sequence cursor;
 5. idempotent reconnect/resume reconciliation after missed events.
 
 ## Issues found and their resolution
@@ -49,7 +50,7 @@ and its network connection. The reliable model is:
 | LC-06 | Map widgets could start/stop transport and open their own continuous stream | Rebuilds could duplicate or tear down live infrastructure | Remove transport ownership and continuous GPS calls from live map widgets; add an architecture regression test | Fixed |
 | LC-07 | Resume depended on opening the journey screen | Peers, self-location, and map state stayed stale until manual reload | App coordinator refreshes active journeys, restores ownership, and runs a coalesced recovery transaction on resume | Fixed |
 | LC-08 | Recovery used a locations-only endpoint | It could not authoritatively recover roster, route version, freshness, or cursor together | Add `GET /journeys/:id/live` and make Flutter prefer it, with fallback only for Nest's explicit unregistered-route response | Fixed |
-| LC-09 | Each client calculated a route locally | Members could see different polylines and reroutes | Store one canonical server-calculated route per journey and have all clients fetch it | Fixed |
+| LC-09 | Route ownership could cross devices | A member could see another participant's path instead of their own destination route | Give every client a personal route keyed to its own current fix and prevent peer routes from entering the live route layer | Fixed |
 | LC-10 | Route writes had no concurrency contract | Competing reroutes could overwrite each other | Add monotonically increasing versions, leader-only writes, request UUID idempotency, row locking, and compare-and-swap `baseVersion` | Fixed |
 | LC-11 | Followers could reroute independently | Convoy members could diverge after off-route detection | Only the leader may create `INITIAL` or `LEADER_REROUTE` route versions | Fixed |
 | LC-12 | A socket event could be missed during suspension | The map could remain on an old version after resume | Treat `route-updated` as a low-latency hint; always recover through canonical GET/live snapshot | Fixed |
@@ -64,6 +65,11 @@ and its network connection. The reliable model is:
 | LC-21 | Canonical route repository contracts still expose nullable data models across the domain boundary | “No committed route” and a request failure are not fully distinguishable, increasing maintenance risk | Track a follow-up to introduce a domain route entity and `Result` contract without expanding the release-critical change | Follow-up; not a runtime release blocker |
 | LC-22 | Leader reroute drawing re-fetches the route it just committed | One redundant request and duplicate navigation assignment occur on reroute | Track a follow-up to draw the returned committed route directly | Follow-up performance cleanup |
 | LC-23 | Every live-snapshot `404` triggered the old-server fallback | A deleted or invalid journey could be misread as an older backend and lose terminal error semantics | Fall back only for Nest's explicit `Cannot GET .../live` unsupported-endpoint response; preserve `Journey not found` as terminal | Fixed |
+| LC-24 | Solo navigation progress remained frozen while the driver was moving | The maneuver distance stayed at `3.0 km`; the driver could not trust the puck, remaining distance, ETA, or route progress | Calculate distance travelled through the projected point inside the matched polyline segment, rather than advancing only at vertices | Fixed in lifecycle v2; physical driving validation required |
+| LC-25 | Rejoining a live journey always required a separate replay request or fresh reload | Resume took longer and depended on several independently timed calls | Include the durable location cursor in `join-journey`; return a bounded missed-update delta in `joined-journey`, or explicitly require canonical snapshot repair when the cursor is absent/too old | Fixed in lifecycle v2 |
+| LC-26 | Every foreground resume recreated the native map surface | Healthy map state, route layers, camera and puck were discarded and visibly rebuilt | Probe the retained surface with repaint/camera calls and recreate only when the probe fails | Fixed in lifecycle v2 |
+| LC-27 | Course-only puck bearing did not reflect physical device rotation at low speed | Stationary and slow movement felt less responsive than Waze/Google Maps | Use device heading below 1 m/s and course above 2.5 m/s, with hysteresis between thresholds | Fixed in lifecycle v2; physical-device validation required |
+| LC-28 | The one-shot location lookup blocked subscription to continuous fixes | Journey startup could wait several seconds even though native streaming was ready | Subscribe to the native stream first; accept the one-shot fix only if it is newer than the streamed fix | Fixed in lifecycle v2 |
 
 ## Implemented PR stack
 
@@ -95,6 +101,16 @@ order. This runbook is the final delivery record.
      rerouting, `route-updated` handling, live snapshot recovery, cache identity,
      and regression coverage.
 
+### Lifecycle v2 (current dedicated branches)
+
+- Backend branch `codex/live-convoy-lifecycle-v2`: resumable Socket.IO join
+  handshake, bounded cursor delta, snapshot-required fallback, structured join
+  recovery logging, and protocol regression tests.
+- Flutter branch `codex/live-convoy-lifecycle-v2`: retained-map health probe,
+  stream-first location startup, cursor-aware room join, within-segment
+  distance/ETA progress, stale-navigation raw-GPS fallback, hybrid puck
+  bearing, freshness logging, and regression tests.
+
 ## Runtime lifecycle
 
 ### Start
@@ -103,18 +119,19 @@ order. This runbook is the final delivery record.
 2. The app coordinator observes the active journey and owns the live session.
 3. The app joins the Socket.IO journey room before waiting for a GPS fix.
 4. The shared OS location stream starts once permission is available.
-5. Every member requests the canonical route. If version zero has no route, the
-   leader posts `INITIAL`; followers wait for the committed route.
+5. Each member builds and renders only its own route from its latest fix to the
+   shared journey destination.
 
 ### While travelling
 
 - The shared location stream publishes the member's position.
 - Socket.IO carries location and lifecycle updates while connected.
-- Only the leader may post a reroute using its current `baseVersion`.
-- After commit, the backend emits `route-updated`. Clients fetch the committed
-  route instead of trusting event payload geometry.
-- A `409 ROUTE_VERSION_CONFLICT` means another request won; the app fetches and
-  displays that committed winner.
+- Native fixes feed navigation progress continuously. Distance and ETA include
+  progress inside the current polyline segment.
+- At low speed the puck follows physical device heading; while driving it
+  follows GPS course.
+- A stale navigation/render tick never pins the camera: fresh raw GPS becomes
+  the temporary display source and a freshness warning is recorded.
 
 ### Screen off, process suspension, reconnect, or resume
 
@@ -122,9 +139,10 @@ order. This runbook is the final delivery record.
   eligible under platform rules.
 - The socket may disconnect or be suspended; correctness does not depend on it
   remaining open continuously.
-- On resume, duplicate signals coalesce into one transaction: refresh active
-  journeys, restore room/location ownership, fetch `/journeys/:id/live`, and
-  fetch/redraw the canonical route as needed.
+- On resume, the retained map is health-checked instead of unconditionally
+  recreated. The room join presents its durable location sequence; the backend
+  returns a bounded delta or asks the already-started `/journeys/:id/live`
+  request to perform canonical repair.
 - Snapshot merging must never overwrite a newer socket position.
 
 ### End
@@ -165,7 +183,11 @@ leader and follower in the same journey.
 |---|---|
 | Lock both screens for 15 minutes while moving | Foreground/background location remains eligible; latest timestamps advance; both recover without recreating the journey |
 | Leave the app backgrounded and switch Wi-Fi/mobile data | Socket reconnects when runnable; live snapshot repairs missed state |
+| Background and foreground the app repeatedly during one journey | Healthy map surface, route, camera and puck remain visible without a full map recreation or manual reload |
+| Reconnect after a small event gap | `joined-journey` returns `DELTA`; missed updates apply once and the durable cursor advances |
+| Reconnect without a cursor or after more than 500 missed updates | `joined-journey` returns `SNAPSHOT_REQUIRED`; `/live` converges roster and current positions |
 | Keep one member stationary | Member remains in roster; freshness and movement state are truthful; no disappearance caused by lack of movement |
+| Drive a solo journey along a long or sparsely encoded route segment | Puck and camera advance continuously; maneuver distance and ETA decrease within the segment rather than changing only at polyline vertices |
 | Deny location to one member | Room membership and roster remain; only that member's location channel reports failure/unknown |
 | Leader goes off route | One new canonical version is committed; every member converges on the same version and geometry |
 | Follower goes off route | Follower does not write or calculate a competing canonical route |
@@ -183,12 +205,17 @@ Add/retain dashboards and structured logs for:
 - `ROUTE_VERSION_CONFLICT` rate;
 - Mapbox calculation errors and cache hit rate;
 - Socket room joins, reconnects, disconnect reason, and `route-updated` emits;
+- join recovery mode (`DELTA` or `SNAPSHOT_REQUIRED`), delta size, and recovery
+  failure count;
 - latest location age by active journey/member and `LIVE/DELAYED/STALE/UNKNOWN`;
 - active journey count versus foreground location publishers where mobile
   telemetry is available;
 - mobile recovery attempts, recovery failures, accepted route version, and
   current journey ID (never raw auth tokens or unnecessarily precise location
   history).
+- age of the last native location fix, navigation-progress tick, and map-render
+  tick, plus location accuracy/speed and matched segment index. Alert when an
+  active journey has movement-speed fixes but no progress or render advancement.
 
 ## Production incident runbook
 
@@ -291,11 +318,23 @@ As of 2026-08-30:
 - Physical screen-off/background acceptance and production smoke tests remain
   release gates and cannot be proven by unit tests.
 
+Lifecycle v2 verification on 2026-09-01:
+
+- Backend: API build, TypeScript typecheck, changed-file lint, and all 22 suites
+  / 135 tests passed.
+- Flutter: all 514 tests passed; 14 platform-dependent tests remained
+  intentionally skipped.
+- The Flutter wrapper still cannot launch its missing analysis-server snapshot.
+  Direct Dart analysis found no new errors in the changed files; the existing
+  repository warning/lint backlog remains.
+
 ## Change log and incident tracking
 
 | Date | Type | Reference | Summary | Follow-up |
 |---|---|---|---|---|
 | 2026-08-30 | Implementation | Backend PRs #120–#122; Flutter PRs #123–#125 | Added app-owned lifecycle, shared background location, authoritative recovery, versioned canonical routes, malformed-payload containment, and bounded follower recovery | Promote backend `main` to `dev`, promote Flutter `main` to `develop`, then complete the physical-device matrix |
+| 2026-09-01 | Field test | WhatsApp video `2026-09-01 01.22.10` | Active solo journey remained visually/progress-wise frozen while the vehicle was moving; maneuver distance stayed at `3.0 km` | Lifecycle v2 now includes within-segment progress and freshness fallback; repeat the same physical driving route before release |
+| 2026-09-01 | Implementation | `codex/live-convoy-lifecycle-v2` in both repositories | Added cursor-aware join recovery, retained-map resume, stream-first location startup, hybrid puck bearing, exact progress, freshness fallback, logging and regression tests | Open PRs to `main`, deploy backend before Flutter, then run the screen-off/reconnect/driving matrix |
 
 For every later production issue, append a row with the incident/ticket link,
 affected releases, root cause, mitigation, fix PR, and validation result.
