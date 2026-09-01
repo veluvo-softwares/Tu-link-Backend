@@ -139,6 +139,19 @@ export class AnalyticsService {
       analyticsList.map((a) => [a.journeyId, a]),
     );
 
+    // A history preview represents the completed trip, not a new route from
+    // wherever the user happens to be now. Return the requesting participant's
+    // first captured point for each journey; "Go again" remains client-side
+    // and deliberately resolves a fresh current position.
+    const firstLocations =
+      await this.locationRepository.getFirstForParticipantAcrossJourneys(
+        sortedJourneys.map((journey) => journey.id),
+        userId,
+      );
+    const originByJourney = new Map(
+      firstLocations.map((location) => [location.journeyId, location.location]),
+    );
+
     return sortedJourneys.map((journey) => {
       const analytics = analyticsByJourney.get(journey.id);
       // The list endpoint omits routePolyline (can be ~30 KB per journey and
@@ -148,7 +161,11 @@ export class AnalyticsService {
         ? // eslint-disable-next-line @typescript-eslint/no-unused-vars
           (({ routePolyline, ...rest }) => rest)(analytics)
         : null;
-      return { ...journey, analytics: listAnalytics };
+      return {
+        ...journey,
+        origin: originByJourney.get(journey.id) ?? null,
+        analytics: listAnalytics,
+      };
     });
   }
 

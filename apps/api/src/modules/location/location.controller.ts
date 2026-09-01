@@ -11,6 +11,7 @@ import {
   ParseIntPipe,
 } from '@nestjs/common';
 import { LocationService } from './location.service';
+import { LocationGateway } from './location.gateway';
 import { LocationUpdateDto } from './dto/location-update.dto';
 import { LocationBackfillDto } from './dto/location-backfill.dto';
 import { FirebaseAuthGuard } from '../../common/guards/firebase-auth.guard';
@@ -19,7 +20,10 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @Controller('locations')
 @UseGuards(FirebaseAuthGuard)
 export class LocationController {
-  constructor(private locationService: LocationService) {}
+  constructor(
+    private locationService: LocationService,
+    private locationGateway: LocationGateway,
+  ) {}
 
   /**
    * REST fallback endpoint for location updates
@@ -34,6 +38,11 @@ export class LocationController {
     const result = await this.locationService.processLocationUpdate(
       userId,
       locationUpdateDto,
+    );
+    await this.locationGateway.handleArrivalResult(
+      locationUpdateDto.journeyId,
+      userId,
+      result.arrival,
     );
     return {
       success: result.success,

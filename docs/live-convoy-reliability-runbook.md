@@ -328,6 +328,14 @@ Lifecycle v2 verification on 2026-09-01:
   Direct Dart analysis found no new errors in the changed files; the existing
   repository warning/lint backlog remains.
 
+Field follow-up verification on 2026-09-01:
+
+- Backend: production build and lint passed; all 24 suites / 140 tests passed.
+- Flutter: all 517 tests passed; 14 platform-dependent tests remained
+  intentionally skipped.
+- Targeted Dart analysis reported no errors in the changed files. Existing
+  warnings and informational lints remain unchanged project debt.
+
 ## Change log and incident tracking
 
 | Date | Type | Reference | Summary | Follow-up |
@@ -335,6 +343,27 @@ Lifecycle v2 verification on 2026-09-01:
 | 2026-08-30 | Implementation | Backend PRs #120–#122; Flutter PRs #123–#125 | Added app-owned lifecycle, shared background location, authoritative recovery, versioned canonical routes, malformed-payload containment, and bounded follower recovery | Promote backend `main` to `dev`, promote Flutter `main` to `develop`, then complete the physical-device matrix |
 | 2026-09-01 | Field test | WhatsApp video `2026-09-01 01.22.10` | Active solo journey remained visually/progress-wise frozen while the vehicle was moving; maneuver distance stayed at `3.0 km` | Lifecycle v2 now includes within-segment progress and freshness fallback; repeat the same physical driving route before release |
 | 2026-09-01 | Implementation | `codex/live-convoy-lifecycle-v2` in both repositories | Added cursor-aware join recovery, retained-map resume, stream-first location startup, hybrid puck bearing, exact progress, freshness fallback, logging and regression tests | Open PRs to `main`, deploy backend before Flutter, then run the screen-off/reconnect/driving matrix |
+| 2026-09-01 | Field test | WhatsApp video `2026-09-01 14.32.25` and images `14.33.20`, `14.34.36`, `14.36.53`, `02.15.34` | History preview incorrectly originated at the current phone position; iOS arrival did not converge with Android; a resumed route took time to catch up; camera/puck motion stepped between fixes; iOS displayed the previous notification icon | Fixed on `codex/live-convoy-field-followups`; validate the four cases below on the next backend and mobile builds |
+| 2026-09-01 | Implementation | `codex/live-convoy-field-followups` in both repositories | History now returns each user's first recorded journey point; REST and WebSocket arrival updates share one finalization path; duplicate arrivals retry idempotent completion; a 30 m immediate arrival geofence tolerates stale speed; grossly stale routes reroute on the first fix; driving camera changes are eased | Deploy backend before mobile; no migration required; confirm the installed iOS build contains the teal/orange AppIcon because iOS notification icons come from the installed app bundle |
+
+### Field follow-up acceptance cases (2026-09-01)
+
+1. Open a completed journey from history while physically somewhere else. Its
+   preview must begin at that journey's first captured point. Tap **Go again**;
+   only then should the route originate at the phone's current position.
+2. Let an iPhone send the final location through both normal WebSocket delivery
+   and forced REST fallback. Every member must receive the arrival state and the
+   journey must complete once, including when a previous completion side effect
+   is being retried.
+3. Background a moving journey long enough to put the cached route more than
+   125 m away. On the first fresh fix, route recovery must start immediately;
+   ordinary 50–124 m GPS deviation still uses sustained-reading protection.
+   While driving, camera position and bearing should ease between fixes and the
+   native directional puck should remain active.
+4. Install the new TestFlight build over the previous build, receive a remote
+   notification, and verify iOS displays the teal/orange installed AppIcon. If
+   the old red `TL` icon remains, record the installed build number and perform
+   a clean install to distinguish an iOS icon cache from a packaged-asset error.
 
 For every later production issue, append a row with the incident/ticket link,
 affected releases, root cause, mitigation, fix PR, and validation result.
