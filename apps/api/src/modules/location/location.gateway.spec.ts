@@ -283,6 +283,23 @@ describe('LocationGateway — arrival notification (NOTIF-08)', () => {
     ).toHaveLength(0);
   });
 
+  it('retries auto-completion for an already-arrived convergence update', async () => {
+    await gateway.handleArrivalResult(JOURNEY_ID, ARRIVER_ID, {
+      arrived: false,
+      alreadyArrived: true,
+      arrivedCount: 3,
+      totalCount: 3,
+      allArrived: true,
+    });
+
+    expect(journeyService.autoCompleteJourney).toHaveBeenCalledWith(JOURNEY_ID);
+    expect(notificationService.sendArrivalDetected).not.toHaveBeenCalled();
+    expect(emitMock).not.toHaveBeenCalledWith(
+      'participant-arrived',
+      expect.anything(),
+    );
+  });
+
   /**
    * NOTIF-10/NOTIF-11 — LocationGateway lag-alert cooldown/escalation/
    * actor-exclusion unit tests. Reuses the outer beforeEach's module setup

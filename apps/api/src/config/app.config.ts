@@ -32,6 +32,10 @@ export default registerAs('app', () => ({
     process.env.ARRIVAL_DISTANCE_THRESHOLD_METERS || '100',
     10,
   ),
+  arrivalImmediateDistanceThresholdMeters: parseInt(
+    process.env.ARRIVAL_IMMEDIATE_DISTANCE_THRESHOLD_METERS || '30',
+    10,
+  ),
   arrivalSpeedThresholdMps: parseFloat(
     process.env.ARRIVAL_SPEED_THRESHOLD_MPS || '1.39',
   ),

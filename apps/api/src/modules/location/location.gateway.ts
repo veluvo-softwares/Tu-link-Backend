@@ -40,6 +40,7 @@ import { LocationBackfillDto } from './dto/location-backfill.dto';
 import { WsExceptionFilter } from '../../common/filters/ws-exception.filter';
 import { NotificationService } from '../notification/notification.service';
 import { LagSeverity } from '../../types/notification.type';
+import { ArrivalResult } from './services/arrival-detection.service';
 import { getAllowedOrigins } from '../../shared/security/cors';
 
 type SocketAuthErrorCode =
@@ -696,65 +697,7 @@ export class LocationGateway
         }
       }
 
-      // Handle arrival events
-      if (result.arrival?.arrived) {
-        const { arrivedCount, totalCount, allArrived } = result.arrival;
-
-        // Notify all journey members of this participant's arrival with progress
-        this.server
-          .to(`journey:${payload.journeyId}`)
-          .emit('participant-arrived', {
-            userId,
-            arrivedCount,
-            totalCount,
-            allArrived,
-            timestamp: Date.now(),
-          });
-
-        // Best-effort ARRIVAL_DETECTED notification (NOTIF-08, D-02/D-12).
-        // Excludes the arriver from recipients via resolveParticipantRecipients.
-        try {
-          const participants =
-            await this.participantService.getJourneyParticipants(
-              payload.journeyId,
-            );
-          const arrivingParticipant = participants.find(
-            (p) => p.userId === userId,
-          );
-          const participantName =
-            arrivingParticipant?.displayName ?? 'A participant';
-          const recipientIds =
-            this.notificationService.resolveParticipantRecipients(
-              participants,
-              userId,
-            );
-          const journey = await this.journeyService.findById(payload.journeyId);
-          await this.notificationService.sendArrivalDetected(
-            payload.journeyId,
-            journey.name,
-            participantName,
-            recipientIds,
-          );
-        } catch (err) {
-          this.logger.error(
-            `Arrival notification failed for journey ${payload.journeyId}: ${(err as Error).message}`,
-            'LocationGateway',
-          );
-          // Do NOT rethrow — mirrors handleAuthLogout error pattern.
-        }
-
-        // Auto-complete the journey when everyone has arrived
-        if (allArrived) {
-          try {
-            await this.journeyService.autoCompleteJourney(payload.journeyId);
-          } catch (endError) {
-            this.logger.error(
-              `Auto-complete failed for journey ${payload.journeyId}: ${endError.message}`,
-              'LocationGateway',
-            );
-          }
-        }
-      }
+      await this.handleArrivalResult(payload.journeyId, userId, result.arrival);
     } catch (error) {
       const latency = Date.now() - startTime;
 
@@ -802,6 +745,70 @@ export class LocationGateway
         message: error.message || 'Failed to process location update',
         timestamp: Date.now(),
       });
+    }
+  }
+
+  /**
+   * Applies arrival side effects for every ingest transport. Both WebSocket
+   * updates and the REST fallback call this routine, so a background client
+   * cannot persist ARRIVED without notifying the room or completing the trip.
+   */
+  async handleArrivalResult(
+    journeyId: string,
+    userId: string,
+    arrival?: ArrivalResult,
+  ): Promise<void> {
+    if (!arrival) return;
+    const { arrivedCount, totalCount, allArrived } = arrival;
+
+    if (arrival.arrived) {
+      this.server.to(`journey:${journeyId}`).emit('participant-arrived', {
+        userId,
+        arrivedCount,
+        totalCount,
+        allArrived,
+        timestamp: Date.now(),
+      });
+
+      try {
+        const participants =
+          await this.participantService.getJourneyParticipants(journeyId);
+        const arrivingParticipant = participants.find(
+          (participant) => participant.userId === userId,
+        );
+        const participantName =
+          arrivingParticipant?.displayName ?? 'A participant';
+        const recipientIds =
+          this.notificationService.resolveParticipantRecipients(
+            participants,
+            userId,
+          );
+        const journey = await this.journeyService.findById(journeyId);
+        await this.notificationService.sendArrivalDetected(
+          journeyId,
+          journey.name,
+          participantName,
+          recipientIds,
+        );
+      } catch (err) {
+        this.logger.error(
+          `Arrival notification failed for journey ${journeyId}: ${(err as Error).message}`,
+          'LocationGateway',
+        );
+      }
+    }
+
+    // Retry completion even when this is a duplicate ARRIVED update. This is
+    // deliberately idempotent and repairs a previous lost side effect.
+    if (allArrived) {
+      try {
+        await this.journeyService.autoCompleteJourney(journeyId);
+      } catch (endError) {
+        this.logger.error(
+          `Auto-complete failed for journey ${journeyId}: ${(endError as Error).message}`,
+          'LocationGateway',
+        );
+      }
     }
   }
 
