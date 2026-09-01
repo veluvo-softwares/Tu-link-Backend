@@ -51,11 +51,21 @@ export class ArrivalDetectionService {
       100;
     const speedThreshold =
       this.configService.get<number>('app.arrivalSpeedThresholdMps') ?? 1.39;
+    const immediateDistanceThreshold =
+      this.configService.get<number>(
+        'app.arrivalImmediateDistanceThresholdMeters',
+      ) ?? 30;
 
     const isWithinDistance = distanceToDestination < distanceThreshold;
     const isLowSpeed = !update.speed || update.speed < speedThreshold;
+    // A GPS course can retain the previous moving speed for a few readings
+    // after the vehicle stops. Inside the small destination geofence, distance
+    // is the stronger signal; farther out we still require low speed so merely
+    // driving past the destination does not count as arrival.
+    const isInsideImmediateGeofence =
+      distanceToDestination < immediateDistanceThreshold;
 
-    if (!isWithinDistance || !isLowSpeed) {
+    if (!isWithinDistance || (!isInsideImmediateGeofence && !isLowSpeed)) {
       return noArrival;
     }
 
@@ -70,7 +80,19 @@ export class ArrivalDetectionService {
     }
 
     if (markResult.alreadyArrived) {
-      return { ...noArrival, alreadyArrived: true };
+      // Recompute convergence even for a duplicate update. The first arrival
+      // may have been persisted through REST while its broadcast/complete side
+      // effect failed; the next update must be able to finish the journey.
+      const { arrivedCount, totalCount } = await this.getArrivalCounts(
+        journey.id,
+      );
+      return {
+        arrived: false,
+        alreadyArrived: true,
+        arrivedCount,
+        totalCount,
+        allArrived: arrivedCount >= totalCount && totalCount > 0,
+      };
     }
 
     const { arrivedCount, totalCount } = await this.getArrivalCounts(

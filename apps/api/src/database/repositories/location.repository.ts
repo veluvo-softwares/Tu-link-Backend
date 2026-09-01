@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, gt, max } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, max } from 'drizzle-orm';
 import { geogPoint, selectLat, selectLng } from '../../common/utils/geo.utils';
 import { Priority } from '../../types/priority.type';
 import { LatLng } from '../schema/columns/geography-point';
@@ -185,6 +185,25 @@ export class LocationRepository {
       .orderBy(desc(locations.recordedAt))
       .limit(1);
     return row ? toRecord(row) : null;
+  }
+
+  /** Earliest recorded point for one participant in each requested journey. */
+  async getFirstForParticipantAcrossJourneys(
+    journeyIds: string[],
+    participantId: string,
+  ): Promise<LocationRecord[]> {
+    if (journeyIds.length === 0) return [];
+    const rows = await this.db
+      .selectDistinctOn([locations.journeyId], this.selection())
+      .from(locations)
+      .where(
+        and(
+          inArray(locations.journeyId, journeyIds),
+          eq(locations.participantId, participantId),
+        ),
+      )
+      .orderBy(locations.journeyId, asc(locations.recordedAt));
+    return rows.map(toRecord);
   }
 
   async getParticipantHistory(

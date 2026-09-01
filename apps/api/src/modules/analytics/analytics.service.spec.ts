@@ -9,6 +9,7 @@ describe('AnalyticsService.getUserJourneyHistory', () => {
   const findByJourneyIds = jest.fn();
   const findJourneyById = jest.fn();
   const findParticipationsByUser = jest.fn();
+  const getFirstForParticipantAcrossJourneys = jest.fn();
   const analyticsRepository = {
     findByJourneyIds,
   } as unknown as jest.Mocked<AnalyticsRepository>;
@@ -18,10 +19,13 @@ describe('AnalyticsService.getUserJourneyHistory', () => {
   const participantRepository = {
     findByUser: findParticipationsByUser,
   } as unknown as jest.Mocked<ParticipantRepository>;
+  const locationRepository = {
+    getFirstForParticipantAcrossJourneys,
+  } as unknown as jest.Mocked<LocationRepository>;
   const service = new AnalyticsService(
     analyticsRepository,
     journeyRepository,
-    {} as LocationRepository,
+    locationRepository,
     {} as LagAlertRepository,
     participantRepository,
   );
@@ -29,6 +33,7 @@ describe('AnalyticsService.getUserJourneyHistory', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     findByJourneyIds.mockResolvedValue([]);
+    getFirstForParticipantAcrossJourneys.mockResolvedValue([]);
   });
 
   it('queries only joined participation states', async () => {
@@ -84,5 +89,30 @@ describe('AnalyticsService.getUserJourneyHistory', () => {
       'cancelled-new',
       'completed-old',
     ]);
+    expect(getFirstForParticipantAcrossJourneys).toHaveBeenCalledWith(
+      ['cancelled-new', 'completed-old'],
+      'user-1',
+    );
+  });
+
+  it('adds the requesting participant first point as the history origin', async () => {
+    findParticipationsByUser.mockResolvedValue([{ journeyId: 'completed' }]);
+    findJourneyById.mockResolvedValue({
+      id: 'completed',
+      status: 'COMPLETED',
+      createdAt: new Date('2026-07-03'),
+    });
+    getFirstForParticipantAcrossJourneys.mockResolvedValue([
+      {
+        journeyId: 'completed',
+        location: { latitude: -1.3, longitude: 36.8 },
+      },
+    ]);
+
+    const history = (await service.getUserJourneyHistory('user-1')) as Array<{
+      origin: { latitude: number; longitude: number } | null;
+    }>;
+
+    expect(history[0]?.origin).toEqual({ latitude: -1.3, longitude: 36.8 });
   });
 });
