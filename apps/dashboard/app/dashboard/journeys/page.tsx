@@ -94,6 +94,7 @@ export default async function JourneysPage() {
                   </div>
                   <div className="journey-meta">
                     <strong>{journey.status}</strong>
+                    <Link className="text-link" href={`/api/operator/journey-reports/${encodeURIComponent(journey.id)}`} target="_blank" rel="noopener noreferrer">View report</Link>
                     <span>
                       {formatWhen(journey.scheduledFor, formatWhen(journey.createdAt, ''))}
                     </span>

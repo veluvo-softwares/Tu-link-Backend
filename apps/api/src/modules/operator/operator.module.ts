@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { OperatorReportRouteService } from './services/operator-report-route.service';
 import { ClerkOrganizationsRepository } from '../../database/repositories/clerk-organizations.repository';
 import { ClerkIdentitySyncService } from './services/clerk-identity-sync.service';
 import { ClerkAuthGuard } from '../../common/guards/clerk-auth.guard';
@@ -14,6 +15,7 @@ import { LocationModule } from '../location/location.module';
     ClerkIdentitySyncService,
     ClerkOrganizationsRepository,
     OperatorAccessService,
+    OperatorReportRouteService,
   ],
   exports: [ClerkAuthGuard, ClerkIdentitySyncService, OperatorAccessService],
 })
