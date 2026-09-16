@@ -10,6 +10,7 @@ import {
   X,
 } from '@phosphor-icons/react';
 import Link from 'next/link';
+import { ThemeToggle } from './theme-toggle';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
@@ -139,6 +140,7 @@ export function OpsChrome({
             <p>{current.context}</p>
           </div>
           <div className="ops-topbar-controls">
+            <ThemeToggle />
             <OrganizationSwitcher
               afterCreateOrganizationUrl="/create-organization"
               createOrganizationMode="navigation"

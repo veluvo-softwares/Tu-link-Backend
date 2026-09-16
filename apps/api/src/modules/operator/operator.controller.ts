@@ -18,12 +18,16 @@ import {
 } from '../../common/guards/clerk-auth.guard';
 import { AddTeamMemberDto } from './dto/add-team-member.dto';
 import { AssignDelegateDto } from './dto/assign-delegate.dto';
+import { OperatorReportRouteService } from './services/operator-report-route.service';
 import { OperatorAccessService } from './services/operator-access.service';
 
 @Controller('operator')
 @UseGuards(ClerkAuthGuard)
 export class OperatorController {
-  constructor(private readonly operatorAccessService: OperatorAccessService) {}
+  constructor(
+    private readonly operatorAccessService: OperatorAccessService,
+    private readonly reportRouteService: OperatorReportRouteService,
+  ) {}
 
   @Get('session')
   async getSession(@Req() request: ClerkRequest) {
@@ -48,6 +52,19 @@ export class OperatorController {
     return this.operatorAccessService.listJourneys(
       identity.orgId,
       identity.userId,
+    );
+  }
+
+  @Get('journeys/:journeyId/report-route')
+  getReportRoute(
+    @Req() request: ClerkRequest,
+    @Param('journeyId', new ParseUUIDPipe()) journeyId: string,
+  ) {
+    const identity = this.requireIdentity(request);
+    return this.reportRouteService.getRoute(
+      identity.orgId,
+      identity.userId,
+      journeyId,
     );
   }
 

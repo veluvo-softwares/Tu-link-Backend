@@ -1,30 +1,40 @@
 import { auth } from '@clerk/nextjs/server';
-import Link from 'next/link';
+import { operatorFetch } from '../../operator-api';
+import { reportFields, type JourneyReport } from '../../journey-reports';
+import { ReportsBrowser } from './reports-browser';
 
 export default async function ReportsPage() {
   await auth.protect();
-
-  return (
-    <main className="dashboard-shell">
-      <section className="dashboard-content">
+  const { getToken, orgId } = await auth();
+  if (!orgId)
+    return (
+      <main className="dashboard-shell">
         <section className="tulink-panel empty-state">
-          <p className="eyebrow">Understand team performance</p>
-          <h1>Reports are not in the operator API yet</h1>
-          <p>
-            This workspace does not expose historical performance, on-time
-            arrival, or shift reports. Live exceptions and journey lists are
-            available from Overview and Live operations.
-          </p>
-          <div className="empty-state-actions">
-            <Link className="tulink-button" href="/dashboard">
-              Overview
-            </Link>
-            <Link className="tulink-button tulink-button-ghost" href="/dashboard/live">
-              Live operations
-            </Link>
-          </div>
+          <h1>Select an organization to view reports</h1>
         </section>
-      </section>
-    </main>
-  );
+      </main>
+    );
+  let journeys: JourneyReport[];
+  try {
+    const token = await getToken();
+    if (!token) throw new Error('Session unavailable');
+    const response = await operatorFetch('/operator/journeys', token);
+    if (!response.ok) throw new Error('Request failed');
+    const payload = await response.json();
+    if (!Array.isArray(payload.data)) throw new Error('Invalid response');
+    journeys = payload.data.map(reportFields);
+  } catch {
+    return (
+      <main className="dashboard-shell">
+        <section className="tulink-panel empty-state" role="alert">
+          <h1>Reports could not be loaded</h1>
+          <p>Please try again. Your journey history has not changed.</p>
+          <a className="tulink-button" href="/dashboard/reports">
+            Try again
+          </a>
+        </section>
+      </main>
+    );
+  }
+  return <ReportsBrowser journeys={journeys} />;
 }

@@ -68,9 +68,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: 'light',
+  colorScheme: 'light dark',
   themeColor: '#075261',
 };
+
+const themeScript = `(function(){try{var t=localStorage.getItem('tulink-theme');document.documentElement.dataset.theme=t==='light'||t==='dark'?t:matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch(e){document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}})()`;
 
 const clerkPublishableKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const manrope = Manrope({
@@ -86,15 +88,16 @@ export default function RootLayout({
 }>) {
   if (!clerkPublishableKey) {
     return (
-      <html lang="en">
-        <body className={`${manrope.variable} ${manrope.className}`}>{children}</body>
+      <html lang="en" suppressHydrationWarning>
+        <body className={`${manrope.variable} ${manrope.className}`}><script dangerouslySetInnerHTML={{ __html: themeScript }} />{children}</body>
       </html>
     );
   }
 
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body className={`${manrope.variable} ${manrope.className}`}>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <ClerkProvider
           publishableKey={clerkPublishableKey}
           signInFallbackRedirectUrl="/dashboard"
