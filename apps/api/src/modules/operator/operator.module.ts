@@ -17,6 +17,7 @@ import { LocationModule } from '../location/location.module';
     OperatorAccessService,
     OperatorReportRouteService,
   ],
-  exports: [ClerkAuthGuard, OperatorAccessService],
+  // Controller guards are instantiated in each consuming module's context.
+  exports: [ClerkAuthGuard, ClerkIdentitySyncService, OperatorAccessService],
 })
 export class OperatorModule {}
