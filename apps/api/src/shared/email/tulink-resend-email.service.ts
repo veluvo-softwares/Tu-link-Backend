@@ -38,16 +38,15 @@ export class TuLinkResendEmailService {
       this.resend = new Resend(apiKey);
       this.isConfigured = true;
       console.log('TuLink Resend email service initialized successfully');
-    } catch (error) {
-      console.error('Failed to initialize Resend:', error);
+    } catch {
+      console.error('Failed to initialize Resend email client');
       this.isConfigured = false;
     }
   }
 
   async sendEmail(options: TuLinkEmailOptions): Promise<boolean> {
     if (!this.isConfigured) {
-      console.log('Resend not configured. Would send email to:', options.to);
-      console.log('Subject:', options.subject);
+      console.log('Resend not configured. Email not sent.');
       return false;
     }
 
@@ -60,14 +59,14 @@ export class TuLinkResendEmailService {
       });
 
       if (error) {
-        console.error('Resend email error:', error);
+        console.error('Resend email delivery failed');
         return false;
       }
 
       console.log('TuLink email sent successfully via Resend:', data?.id);
       return true;
-    } catch (error) {
-      console.error('Failed to send TuLink email via Resend:', error);
+    } catch {
+      console.error('Failed to send TuLink email');
       return false;
     }
   }

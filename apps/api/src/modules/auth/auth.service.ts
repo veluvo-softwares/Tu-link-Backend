@@ -753,11 +753,16 @@ export class AuthService {
           message: 'Password reset email sent successfully',
         };
       } else {
-        // Fallback: log the link if email service fails
-        console.log(`Email service failed. Password reset link: ${link}`);
+        // Never log the reset link: it contains the bearer token that can
+        // change the recipient's password.
+        this.logger.error(
+          'Password reset email delivery failed',
+          undefined,
+          AuthService.name,
+        );
         return {
           success: true,
-          message: 'Password reset initiated (check server logs for link)',
+          message: 'If the email exists, a password reset link has been sent',
         };
       }
     } catch (error) {
@@ -768,7 +773,13 @@ export class AuthService {
           message: 'If the email exists, a password reset link has been sent',
         };
       }
-      console.error('Send password reset error:', error);
+      // Avoid serializing arbitrary provider errors, which may include the
+      // generated action link or other sensitive request data.
+      this.logger.error(
+        'Password reset request failed',
+        undefined,
+        AuthService.name,
+      );
       throw new Error('Failed to send password reset email');
     }
   }
